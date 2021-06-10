@@ -14,7 +14,8 @@ data Message = Message { chatID :: Integer,
 
 instance FromJSON Message where
     parseJSON = withObject "Message" $ \obj -> do
-        message <- obj .: "message"
+        [result] <- obj .: "result"
+        message <- result .: "message"
         messageID <- message .: "message_id"
         from <- message .: "from"
         fromChatID <- from .: "id"
@@ -26,16 +27,13 @@ instance FromJSON Message where
                         messageID = messageID,
                         text = text}
 
-parseMessages :: Value -> Parser [Message]
-parseMessages = withObject "Array of messages" $ \obj -> obj .: "result"
-
 -- ??? take it from configs
 token :: ByteString
  
 
 getUpdates :: IO Value
 getUpdates = do 
-            let path = "/bot" <> token <> "/getUpdates"
+            let path = "/bot" <> token <> "/getUpdates?limit=1"
             let request = setRequestPath path 
                             $ setRequestHost "api.telegram.org" 
                             $ setRequestPort 443
@@ -46,5 +44,5 @@ getUpdates = do
 main :: IO ()
 main = do 
     r <- getUpdates
-    let r' = parseMaybe parseMessages r
+    let r' = parseMaybe parseJSON r :: Maybe Message
     print r'
