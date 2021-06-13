@@ -64,15 +64,19 @@ sendMessage chatID text = do
                 params = [("chat_id", Just chatID), 
                           ("text", Just text)]
 
-repeatMessage :: Message -> IO Int
-repeatMessage mes = do 
-    response <- httpJSON req :: IO (Response Value)
-    return $ getResponseStatusCode response 
-        where   req =  makeRequest "/copyMessage" finalParams Null
-                finalParams = fmap (\(a, b) -> (a, Just $ toByteString b)) params
-                params = [("chat_id", chatID mes), 
-                          ("from_chat_id", fromChatID mes),
-                          ("message_id", messageID mes)]
+repeatMessage :: Int -> Message -> IO Int
+repeatMessage n mes = send n
+    where   send :: Int -> IO Int
+            send 0 = return (200 :: Int)
+            send n = do 
+                response <- httpJSON req :: IO (Response Value)
+                let status = getResponseStatusCode response
+                if status == 200 then send $ n-1 else return status
+            req =  makeRequest "/copyMessage" finalParams Null
+            finalParams = fmap (\(a, b) -> (a, Just $ toByteString b)) params
+            params = [("chat_id", chatID mes), 
+                    ("from_chat_id", fromChatID mes),
+                    ("message_id", messageID mes)]
 
 toByteString :: Show a => a -> ByteString 
 toByteString x = Char8.pack $ show x
