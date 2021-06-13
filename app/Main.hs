@@ -35,6 +35,15 @@ instance FromJSON Message where
 token :: ByteString
  
 
+helpText :: ByteString 
+helpText = "No help for you"
+
+repeatText :: ByteString 
+repeatText = "Choose your destiny mortal"
+
+repeatTimes :: Int
+repeatTimes = 3
+
 makeRequest :: ByteString -> Query -> Value -> Request 
 makeRequest path params json = let fullPath = "/bot" <> token <> path
                          in setRequestBodyJSON json
@@ -56,13 +65,28 @@ getUpdate mes = do
                 getOffset Nothing = Nothing
                 getOffset (Just mes) = Just . toByteString $ updateID mes + 1
 
-sendMessage :: ByteString -> ByteString -> IO Int
-sendMessage chatID text = do 
+sendHelp :: ByteString -> IO Int
+sendHelp chatID = do 
     response <- httpJSON req :: IO (Response Value)
     return $ getResponseStatusCode response 
         where   req = makeRequest "/sendMessage" params Null
                 params = [("chat_id", Just chatID), 
-                          ("text", Just text)]
+                          ("text", Just helpText)]
+
+sendRepeatQuestion :: ByteString -> IO Int
+sendRepeatQuestion chatID = do 
+    response <- httpJSON req :: IO (Response Value)
+    return $ getResponseStatusCode response 
+        where   req = makeRequest "/sendMessage" params buttons
+                params = [("chat_id", Just chatID), 
+                          ("text", Just repeatText)]
+
+buttons :: Value
+buttons = object [ "reply_markup" .= object [
+    "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
+    "resize_keyboard" .= True,
+    "one_time_keyboard" .= True
+    ]]
 
 repeatMessage :: Int -> Message -> IO Int
 repeatMessage n mes = send n
@@ -78,10 +102,19 @@ repeatMessage n mes = send n
                     ("from_chat_id", fromChatID mes),
                     ("message_id", messageID mes)]
 
+chooseAnswer :: Message -> IO Int
+chooseAnswer mes = case text mes of
+                Just "/help" -> sendHelp chat
+                Just "/repeat" -> sendRepeatQuestion chat
+                _ -> repeatMessage repeatTimes mes
+    where chat = toByteString $ chatID mes
+
 toByteString :: Show a => a -> ByteString 
 toByteString x = Char8.pack $ show x
 
 main :: IO ()
 main = do 
     r <- getUpdate Nothing
-    print r
+    result <- case r of
+        Just mes -> chooseAnswer mes
+    print result
