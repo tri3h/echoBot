@@ -33,7 +33,6 @@ instance FromJSON Message where
 
 -- ??? take it from configs
 token :: ByteString
- 
 
 helpText :: ByteString 
 helpText = "No help for you"
@@ -59,7 +58,8 @@ getUpdate mes = do
     let newMessage = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
     return newMessage
         where   req = makeRequest "/getUpdates" params Null 
-                params = [("limit", Just "1"), 
+                params = [("limit", Just "1"),
+                          ("timeout", Just "10"), 
                           ("offset", getOffset mes)] 
                 getOffset :: Maybe Message -> Maybe ByteString
                 getOffset Nothing = Nothing
@@ -80,13 +80,12 @@ sendRepeatQuestion chatID = do
         where   req = makeRequest "/sendMessage" params buttons
                 params = [("chat_id", Just chatID), 
                           ("text", Just repeatText)]
-
-buttons :: Value
-buttons = object [ "reply_markup" .= object [
-    "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
-    "resize_keyboard" .= True,
-    "one_time_keyboard" .= True
-    ]]
+                buttons :: Value
+                buttons = object [ "reply_markup" .= object [
+                            "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
+                            "resize_keyboard" .= True,
+                            "one_time_keyboard" .= True
+                            ]]
 
 repeatMessage :: Int -> Message -> IO Int
 repeatMessage n mes = send n
@@ -112,9 +111,15 @@ chooseAnswer mes = case text mes of
 toByteString :: Show a => a -> ByteString 
 toByteString x = Char8.pack $ show x
 
+getUpdates :: Maybe Message -> IO ()
+getUpdates mes = do
+    update <- getUpdate mes 
+    case update of
+        Just m -> do
+            status <- chooseAnswer m
+            print status
+            getUpdates update
+        Nothing -> getUpdates Nothing
+
 main :: IO ()
-main = do 
-    r <- getUpdate Nothing
-    result <- case r of
-        Just mes -> chooseAnswer mes
-    print result
+main = getUpdates Nothing
