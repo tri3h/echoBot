@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2dcb7301762baa9fa577d12491fc3bda3697acd0772fc243d6863917a371f6a0
+-- hash: bf8db4ba7440b40c53a3ddb1c0f334196ff1f0a7e159cb918e0940f2a51f63cc
 
 name:           bot
 version:        0.1.0.0
@@ -33,8 +33,10 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
     , bytestring
+    , configurator
     , http-conduit
   default-language: Haskell2010
 
@@ -46,9 +48,11 @@ executable bot-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
     , bot
     , bytestring
+    , configurator
     , http-conduit
   default-language: Haskell2010
 
@@ -61,8 +65,10 @@ test-suite bot-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
     , bot
     , bytestring
+    , configurator
     , http-conduit
   default-language: Haskell2010

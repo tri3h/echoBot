@@ -4,9 +4,10 @@ module Main where
 
 import Network.HTTP.Simple
 import Data.ByteString
-import Data.ByteString.Char8 as Char8
+import qualified Data.ByteString.Char8 as Char8
 import Data.Aeson
 import Data.Aeson.Types
+import qualified Data.Configurator as Conf
 
 data Message = Message { updateID :: Integer,
                          chatID :: Integer, 
@@ -31,20 +32,13 @@ instance FromJSON Message where
                          messageID = messageID,
                          text = text }
 
--- ??? take it from configs
-token :: ByteString
+data Config = Config { token :: ByteString,
+                       helpText :: ByteString,
+                       repeatText :: ByteString,
+                       repeatTimes :: Int }
 
-helpText :: ByteString 
-helpText = "No help for you"
-
-repeatText :: ByteString 
-repeatText = "Choose your destiny mortal"
-
-repeatTimes :: Int
-repeatTimes = 3
-
-makeRequest :: ByteString -> Query -> Value -> Request 
-makeRequest path params json = let fullPath = "/bot" <> token <> path
+makeRequest :: Config -> ByteString -> Query -> Value -> Request 
+makeRequest conf path params json = let fullPath = "/bot" `append` token conf `append` path
                          in setRequestBodyJSON json
                             $ setRequestQueryString params
                             $ setRequestPath fullPath 
@@ -52,12 +46,12 @@ makeRequest path params json = let fullPath = "/bot" <> token <> path
                             $ setRequestPort 443
                             $ setRequestSecure True defaultRequest 
 
-getUpdate :: Maybe Message -> IO (Maybe Message)
-getUpdate mes = do 
+getUpdate :: Config -> Maybe Message -> IO (Maybe Message)
+getUpdate conf mes = do 
     response <- httpJSON req
     let newMessage = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
     return newMessage
-        where   req = makeRequest "/getUpdates" params Null 
+        where   req = makeRequest conf "/getUpdates" params Null 
                 params = [("limit", Just "1"),
                           ("timeout", Just "10"), 
                           ("offset", getOffset mes)] 
@@ -65,21 +59,21 @@ getUpdate mes = do
                 getOffset Nothing = Nothing
                 getOffset (Just mes) = Just . toByteString $ updateID mes + 1
 
-sendHelp :: ByteString -> IO Int
-sendHelp chatID = do 
+sendHelp :: Config -> ByteString -> IO Int
+sendHelp conf chatID = do 
     response <- httpJSON req :: IO (Response Value)
     return $ getResponseStatusCode response 
-        where   req = makeRequest "/sendMessage" params Null
+        where   req = makeRequest conf "/sendMessage" params Null
                 params = [("chat_id", Just chatID), 
-                          ("text", Just helpText)]
+                          ("text", Just (helpText conf))]
 
-sendRepeatQuestion :: ByteString -> IO Int
-sendRepeatQuestion chatID = do 
+sendRepeatQuestion :: Config -> ByteString -> IO Int
+sendRepeatQuestion conf chatID = do 
     response <- httpJSON req :: IO (Response Value)
     return $ getResponseStatusCode response 
-        where   req = makeRequest "/sendMessage" params buttons
+        where   req = makeRequest conf "/sendMessage" params buttons
                 params = [("chat_id", Just chatID), 
-                          ("text", Just repeatText)]
+                          ("text", Just $ repeatText conf)]
                 buttons :: Value
                 buttons = object [ "reply_markup" .= object [
                             "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
@@ -87,39 +81,49 @@ sendRepeatQuestion chatID = do
                             "one_time_keyboard" .= True
                             ]]
 
-repeatMessage :: Int -> Message -> IO Int
-repeatMessage n mes = send n
+repeatMessage :: Config -> Message -> IO Int
+repeatMessage conf mes = send times
     where   send :: Int -> IO Int
             send 0 = return (200 :: Int)
             send n = do 
                 response <- httpJSON req :: IO (Response Value)
                 let status = getResponseStatusCode response
                 if status == 200 then send $ n-1 else return status
-            req =  makeRequest "/copyMessage" finalParams Null
+            req =  makeRequest conf "/copyMessage" finalParams Null
             finalParams = fmap (\(a, b) -> (a, Just $ toByteString b)) params
             params = [("chat_id", chatID mes), 
                     ("from_chat_id", fromChatID mes),
                     ("message_id", messageID mes)]
+            times = repeatTimes conf
 
-chooseAnswer :: Message -> IO Int
-chooseAnswer mes = case text mes of
-                Just "/help" -> sendHelp chat
-                Just "/repeat" -> sendRepeatQuestion chat
-                _ -> repeatMessage repeatTimes mes
+chooseAnswer :: Config -> Message -> IO Int
+chooseAnswer conf mes = case text mes of
+                Just "/help" -> sendHelp conf chat
+                Just "/repeat" -> sendRepeatQuestion conf chat
+                _ -> repeatMessage conf mes 
     where chat = toByteString $ chatID mes
 
 toByteString :: Show a => a -> ByteString 
 toByteString x = Char8.pack $ show x
 
-getUpdates :: Maybe Message -> IO ()
-getUpdates mes = do
-    update <- getUpdate mes 
+getUpdates :: Config -> Maybe Message -> IO ()
+getUpdates conf mes = do
+    update <- getUpdate conf mes
     case update of
         Just m -> do
-            status <- chooseAnswer m
+            status <- chooseAnswer conf m
             print status
-            getUpdates update
-        Nothing -> getUpdates Nothing
+            getUpdates conf update
+        Nothing -> getUpdates conf Nothing
 
 main :: IO ()
-main = getUpdates Nothing
+main = do 
+    config <- Conf.load [Conf.Required "bot.config"]
+    confToken <- Conf.require config "token"
+    confHelpText <- Conf.require config "help_text"
+    confRepeatText <- Conf.require config "repeat_text"
+    confRepeatTimes <- Conf.require config "repeat_times"
+    let myConfig = Config {token = confToken, helpText = confHelpText, repeatText = confRepeatText, repeatTimes = confRepeatTimes}
+    getUpdates myConfig Nothing
+    Conf.display config
+
