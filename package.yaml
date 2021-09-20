@@ -25,6 +25,7 @@ dependencies:
 - bytestring
 - aeson
 - configurator
+- directory
 
 library:
   source-dirs: src
