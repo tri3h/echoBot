@@ -26,6 +26,7 @@ dependencies:
 - aeson
 - configurator
 - directory
+- text
 
 library:
   source-dirs: src

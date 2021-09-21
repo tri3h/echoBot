@@ -6,6 +6,7 @@ import Network.HTTP.Simple
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import Data.Aeson
+import qualified Data.Text as Text
 import Data.Aeson.Types
 import qualified Data.List as List
 import qualified Data.Configurator as Config
@@ -58,9 +59,9 @@ sendHelp conf chatID = do
     return $ getResponseStatusCode response
 
 sendRepeatQuestion :: ConfigT.Config -> BS.ByteString -> IO Int
-sendRepeatQuestion conf chatID = do 
+sendRepeatQuestion conf id = do 
     repeatText <- Config.require conf "repeat_text"
-    let params = [("chat_id", Just chatID), 
+    let params = [("chat_id", Just id), 
                           ("text", Just repeatText)]
     let buttons = object [ "reply_markup" .= object [
                             "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
@@ -72,8 +73,8 @@ sendRepeatQuestion conf chatID = do
     confirmMes <- getUpdate conf Nothing
     repeatTimesMes <- getRepeatTimesMes confirmMes
     case text repeatTimesMes of
-        Nothing -> return (400 :: Int)
-        Just x -> changeRepeatTimes x conf
+        Just x -> changeRepeatTimes x (Char8.unpack id) conf
+        Nothing -> return 400
     return 200
         where   getRepeatTimesMes :: Maybe Message -> IO Message
                 getRepeatTimesMes mes = do 
@@ -82,17 +83,18 @@ sendRepeatQuestion conf chatID = do
                         Nothing -> getRepeatTimesMes mes
                         Just x -> return x
 
-changeRepeatTimes :: String -> ConfigT.Config -> IO Int
-changeRepeatTimes val conf = do
+changeRepeatTimes :: String -> String -> ConfigT.Config -> IO Int
+changeRepeatTimes val id conf = do
     let path = "bot.config"
+        name = "id" ++ id
     handle <- IO.openFile path IO.ReadMode 
     (tempName, tempHandle) <- IO.openTempFile "." "temp"
     contents <- IO.hGetContents handle
     let linedContents = lines contents
-        index = List.findIndex (List.isPrefixOf "repeat_times") linedContents
+        index = List.findIndex (List.isInfixOf name) linedContents
         newContents = case index of 
                         Just x -> let (a, b) = splitAt x linedContents 
-                                 in unlines $ a ++ ["repeat_times = " ++ val] ++ tail b
+                                 in unlines $ a ++ [name ++ " = " ++ val] ++ tail b
                         Nothing -> contents
     IO.hPutStr tempHandle newContents
     IO.hClose handle
@@ -104,7 +106,11 @@ changeRepeatTimes val conf = do
 
 repeatMessage :: ConfigT.Config -> Message -> IO Int
 repeatMessage conf mes = do 
-    times <- Config.require conf "repeat_times"
+    let path = "repeat_times.id" ++ show (chatID mes)
+    userTimes <- Config.lookup conf $ Text.pack path
+    times <- case userTimes of 
+                    Just x -> return x
+                    Nothing -> Config.require conf "repeat_times.default"
     send times
     where   send :: Int -> IO Int
             send 0 = return (200 :: Int)
