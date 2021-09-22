@@ -69,7 +69,7 @@ sendRepeatQuestion conf id = do
                             "one_time_keyboard" .= True
                             ]]    
     req <- makeRequest conf "/sendMessage" params buttons
-    httpJSON req :: IO (Response Value)
+    response <- httpJSON req :: IO (Response Value)
     confirmMes <- getUpdate conf Nothing
     repeatTimesMes <- getRepeatTimesMes confirmMes
     case text repeatTimesMes of
@@ -81,7 +81,9 @@ sendRepeatQuestion conf id = do
                     newMes <- getUpdate conf mes
                     case newMes of
                         Nothing -> getRepeatTimesMes mes
-                        Just x -> return x
+                        Just x -> do
+                            getUpdate conf newMes
+                            return x
 
 changeRepeatTimes :: String -> String -> ConfigT.Config -> IO Int
 changeRepeatTimes val id conf = do
