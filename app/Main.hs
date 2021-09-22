@@ -60,14 +60,15 @@ sendHelp conf chatID = do
 
 sendRepeatQuestion :: ConfigT.Config -> BS.ByteString -> IO Int
 sendRepeatQuestion conf id = do 
+    oldRepeatTimes <- getRepeatTimes conf (Char8.unpack id)
     repeatText <- Config.require conf "repeat_text"
     let params = [("chat_id", Just id), 
-                          ("text", Just repeatText)]
-    let buttons = object [ "reply_markup" .= object [
+                          ("text", Just $ repeatText `BS.append` toByteString oldRepeatTimes)]
+        buttons = object [ "reply_markup" .= object [
                             "keyboard" .= [["1", "2", "3", "4", "5" :: String]],
                             "resize_keyboard" .= True,
                             "one_time_keyboard" .= True
-                            ]]    
+                            ]]
     req <- makeRequest conf "/sendMessage" params buttons
     response <- httpJSON req :: IO (Response Value)
     confirmMes <- getUpdate conf Nothing
@@ -106,13 +107,17 @@ changeRepeatTimes val id conf = do
     Config.reload conf
     return 200
 
+getRepeatTimes :: ConfigT.Config -> String -> IO Int
+getRepeatTimes conf id = do 
+    let path = "repeat_times.id" ++ id
+    userTimes <- Config.lookup conf $ Text.pack path
+    case userTimes of 
+            Just x -> return x
+            Nothing -> Config.require conf "repeat_times.default"
+
 repeatMessage :: ConfigT.Config -> Message -> IO Int
 repeatMessage conf mes = do 
-    let path = "repeat_times.id" ++ show (chatID mes)
-    userTimes <- Config.lookup conf $ Text.pack path
-    times <- case userTimes of 
-                    Just x -> return x
-                    Nothing -> Config.require conf "repeat_times.default"
+    times <- getRepeatTimes conf (show $ chatID mes)
     send times
     where   send :: Int -> IO Int
             send 0 = return (200 :: Int)
