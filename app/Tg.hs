@@ -34,14 +34,18 @@ main = do
             let path = "bot.config"
                 name = "id" ++ id
             handle <- IO.openFile path IO.ReadMode 
-            (tempName, tempHandle) <- IO.openTempFile "." "temp"
             contents <- IO.hGetContents handle
             let linedContents = lines contents
-                index = List.findIndex (List.isInfixOf name) linedContents
-                newContents = case index of 
+                indexUser = List.findIndex (List.isInfixOf name) linedContents
+                indexDefault = List.findIndex (List.isInfixOf "default") linedContents
+                newContents = case indexUser of 
                         Just x -> let (a, b) = splitAt x linedContents 
                                  in unlines $ a ++ [name ++ " = " ++ val] ++ tail b
-                        Nothing -> contents
+                        Nothing -> case indexDefault of
+                                    Just x -> let (a, b) = splitAt x linedContents 
+                                        in unlines $ a ++ [name ++ " = " ++ val] ++ b
+                                    Nothing -> contents
+            (tempName, tempHandle) <- IO.openTempFile "." "temp"
             IO.hPutStr tempHandle newContents
             IO.hClose handle
             IO.hClose tempHandle
