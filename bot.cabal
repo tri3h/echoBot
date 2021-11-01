@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d9c5a8ea546560d37bcae8860dfb49dedf58ee25371cd89055e7a020ccb1e018
+-- hash: c994c72db703f0b99b56dafe91f53a59e361b281ca5eebc726316f28009e2e45
 
 name:           bot
 version:        0.1.0.0
@@ -40,14 +40,17 @@ library
     , directory
     , http-conduit
     , text
+    , random
   default-language: Haskell2010
 
 executable bot-exe
   main-is: Main.hs
   other-modules:
       Handlers.Tg
+      Handlers.Vk
       Logger
       Tg
+      Vk
       Paths_bot
   hs-source-dirs:
       app
@@ -61,6 +64,7 @@ executable bot-exe
     , directory
     , http-conduit
     , text
+    , random
   default-language: Haskell2010
 
 test-suite bot-test
@@ -80,4 +84,5 @@ test-suite bot-test
     , directory
     , http-conduit
     , text
+    , random
   default-language: Haskell2010

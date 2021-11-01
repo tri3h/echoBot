@@ -27,6 +27,7 @@ dependencies:
 - configurator
 - directory
 - text
+- random
 
 library:
   source-dirs: src
