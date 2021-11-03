@@ -16,8 +16,28 @@ import System.Random
 data Message = Message { tsMes :: String,
                         peerID :: Integer,
                         text :: Maybe String,
-                        attachments :: Maybe Array } deriving Show
+                        attachments :: Maybe [Attachment] } deriving Show
  
+data Attachment = Attachment { name :: String,
+                            ownerID :: Integer,
+                            mediaID :: Integer,
+                            accessKey :: Maybe String } deriving Show
+
+instance FromJSON Attachment where
+    parseJSON = withObject "Attachment" $ \o -> do
+        name <- o .: "type"
+        media <- o .: Text.pack name
+        id <- media .:? "owner_id" :: Parser (Maybe Integer)
+        ownerID <- case id of
+                Just x -> media .: "owner_id"
+                Nothing -> media .: "to_id"
+        mediaID <- media .: "id"
+        accessKey <- media .:? "access_key"
+        return Attachment { name = name,
+                            ownerID = ownerID,
+                            mediaID = mediaID,
+                            accessKey = accessKey}
+
 instance FromJSON Message where
    parseJSON = withObject "Message" $ \o -> do
        ts <- o .: "ts"
@@ -61,11 +81,11 @@ getConnectionInfo token groupID = do
         Just x -> return x
         Nothing -> exitFailure 
 
-getUpdate :: ConnectionInfo -> IO (Maybe Message)
-getUpdate info = do
+getUpdate :: ConnectionInfo -> String -> IO (Maybe Message)
+getUpdate info ts = do
     let path = Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
                 `BS.append` "?act=a_check&key=" `BS.append` Char8.pack (key info) `BS.append` "&ts=" 
-                `BS.append` Char8.pack (ts info) `BS.append` "&wait=25"
+                `BS.append` Char8.pack ts `BS.append` "&wait=25"
         req = setRequestPath path
             $ setRequestHost "lp.vk.com"
             $ setRequestPort 443
@@ -73,12 +93,30 @@ getUpdate info = do
     response <- httpJSON req :: IO (Response Value)
     return (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
 
+getUpdates :: ConnectionInfo -> ByteString -> IO ()
+getUpdates info token = do
+   message <- getUpdate info (ts info)
+   get message
+    where   get :: Maybe Message -> IO ()
+            get mes = case mes of 
+                        Just m -> do
+                            repeatMessage m token
+                            -- заменить на выбор ответа
+                            newMes <- getUpdate info (tsMes m)
+                            get newMes
+                        Nothing -> getUpdates info token
+
 repeatMessage :: Message -> ByteString -> IO ()
 repeatMessage mes token = do
-    random <- randomRIO (10000, 10000000) :: IO Integer
-    let t = case text mes of
-                Just x -> x
-        param = [("message", Just $ Encoding.encodeUtf8 $ Text.pack t),
+    random <- randomRIO (0, 100000000) :: IO Integer
+    let botMessage = case text mes of
+                        Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
+                        Nothing -> Nothing
+        botAttachments = case attachments mes of
+                        Just x -> Just . Char8.pack $ toString x
+                        Nothing -> Nothing
+        param = [("message", botMessage),
+                ("attachment", botAttachments),
                 ("peer_id", Just $ toByteString $ peerID mes),
                 ("random_id", Just $ toByteString random),
                 ("access_token", Just token),
@@ -91,6 +129,15 @@ repeatMessage mes token = do
             $ setRequestSecure True defaultRequest
     resp <- httpJSON req :: IO (Response Value)
     return ()
+    where   toString :: [Attachment] -> String
+            toString [] = ""
+            toString [x] = makeString x
+            toString (x:xs) = makeString x ++ "," ++ toString xs
+            makeString :: Attachment -> String
+            makeString x = let maybeKey = case accessKey x of
+                                            Just key -> "_" ++ key
+                                            Nothing -> ""
+                            in name x ++ show (ownerID x) ++ "_" ++ show (mediaID x) ++ maybeKey
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
@@ -101,7 +148,4 @@ main = do
     token <- Config.require config "token"
     groupID <- Config.require config "group_id"
     info <- getConnectionInfo token groupID
-    upd <- getUpdate info
-    case upd of
-        Just x -> repeatMessage x token
-
+    getUpdates info token
