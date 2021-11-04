@@ -7,6 +7,7 @@ import Network.HTTP.Simple
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal
 import qualified Data.Configurator as Config
+import qualified Data.Configurator.Types as ConfigT
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text as Text
@@ -93,21 +94,49 @@ getUpdate info ts = do
     response <- httpJSON req :: IO (Response Value)
     return (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
 
-getUpdates :: ConnectionInfo -> ByteString -> IO ()
-getUpdates info token = do
+getUpdates :: ConnectionInfo -> ConfigT.Config -> IO ()
+getUpdates info config = do
    message <- getUpdate info (ts info)
    get message
     where   get :: Maybe Message -> IO ()
             get mes = case mes of 
                         Just m -> do
-                            repeatMessage m token
-                            -- заменить на выбор ответа
+                            chooseAnswer m config
                             newMes <- getUpdate info (tsMes m)
                             get newMes
-                        Nothing -> getUpdates info token
+                        Nothing -> getUpdates info config
 
-repeatMessage :: Message -> ByteString -> IO ()
-repeatMessage mes token = do
+chooseAnswer :: Message -> ConfigT.Config -> IO ()
+chooseAnswer mes config = case text mes of
+               Just "/help" -> sendHelp config mes
+               Just "/repeat" -> getRepeatNumFromUser config
+               _ -> repeatMessage mes config
+
+sendHelp :: ConfigT.Config -> Message -> IO ()
+sendHelp config mes = do
+    helpText <- Config.require config "help_text"
+    token <- Config.require config "token"
+    random <- randomRIO (0, 100000000) :: IO Integer
+    let param = [("message", Just helpText),
+                ("peer_id", Just $ toByteString $ peerID mes),
+                ("random_id", Just $ toByteString random),
+                ("access_token", Just token),
+                ("v", Just $ toByteString 5.131)]
+        path = "/method/messages.send"
+        req = setRequestPath path
+            $ setRequestQueryString param
+            $ setRequestHost "api.vk.com"
+            $ setRequestPort 443
+            $ setRequestSecure True defaultRequest
+    resp <- httpJSON req :: IO (Response Value)
+    return ()
+
+getRepeatNumFromUser :: ConfigT.Config -> IO ()
+getRepeatNumFromUser = undefined
+
+repeatMessage :: Message -> ConfigT.Config -> IO ()
+repeatMessage mes config = do
+    token <- Config.require config "token"
     random <- randomRIO (0, 100000000) :: IO Integer
     let botMessage = case text mes of
                         Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
@@ -148,4 +177,4 @@ main = do
     token <- Config.require config "token"
     groupID <- Config.require config "group_id"
     info <- getConnectionInfo token groupID
-    getUpdates info token
+    getUpdates info config
