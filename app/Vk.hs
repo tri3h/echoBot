@@ -3,8 +3,10 @@
 module Vk where
 
 import Data.Aeson.Types
+import Data.Aeson
 import Network.HTTP.Simple
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import Data.ByteString.Internal
 import qualified Data.Configurator as Config
 import qualified Data.Configurator.Types as ConfigT
@@ -109,7 +111,7 @@ getUpdates info config = do
 chooseAnswer :: Message -> ConfigT.Config -> IO ()
 chooseAnswer mes config = case text mes of
                Just "/help" -> sendHelp config mes
-               Just "/repeat" -> getRepeatNumFromUser config
+               Just "/repeat" -> getRepeatNumFromUser config mes
                _ -> repeatMessage mes config
 
 sendHelp :: ConfigT.Config -> Message -> IO ()
@@ -131,8 +133,53 @@ sendHelp config mes = do
     resp <- httpJSON req :: IO (Response Value)
     return ()
 
-getRepeatNumFromUser :: ConfigT.Config -> IO ()
-getRepeatNumFromUser = undefined
+getRepeatNumFromUser :: ConfigT.Config -> Message -> IO ()
+getRepeatNumFromUser config mes = do
+    oldRepeat <- getRepeatNum config (show $ peerID mes)
+    token <- Config.require config "token"
+    repeatText <- Config.require config "repeat_text"
+    random <- randomRIO (0, 100000000) :: IO Integer
+    let param = [("keyboard", Just $ BSL.toStrict $ encode buttons),
+                ("message", Just $ repeatText `BS.append` toByteString oldRepeat),
+                ("peer_id", Just $ toByteString $ peerID mes),
+                ("random_id", Just $ toByteString random),
+                ("access_token", Just token),
+                ("v", Just $ toByteString 5.131)]
+        buttons =  object ["one_time" .= True,
+                            "buttons" .= [[
+                                object ["action" .= object 
+                                            ["type" .= ("text" :: String),
+                                            "label" .= ("1" :: String)]],
+                                object ["action" .= object 
+                                            ["type" .= ("text" :: String),
+                                            "label" .= ("2" :: String)]],
+                                object ["action" .= object 
+                                            ["type" .= ("text" :: String),
+                                            "label" .= ("3" :: String)]],
+                                object ["action" .= object 
+                                            ["type" .= ("text" :: String),
+                                            "label" .= ("4" :: String)]],
+                                object ["action" .= object 
+                                            ["type" .= ("text" :: String),
+                                            "label" .= ("5" :: String)]]
+                                            ]]
+                            ]
+        path = "/method/messages.send"
+        req = setRequestPath path
+            $ setRequestQueryString param
+            $ setRequestHost "api.vk.com"
+            $ setRequestPort 443
+            $ setRequestSecure True defaultRequest
+    response <- httpJSON req :: IO (Response Value)
+    print response
+
+getRepeatNum :: ConfigT.Config -> String -> IO Int 
+getRepeatNum config id = do
+    let path = "repeat_times.id" ++ id
+    userTimes <- Config.lookup config $ Text.pack path
+    case userTimes of 
+        Just x -> return x
+        Nothing -> Config.require config "repeat_times.default"
 
 repeatMessage :: Message -> ConfigT.Config -> IO ()
 repeatMessage mes config = do
