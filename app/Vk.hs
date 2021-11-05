@@ -13,6 +13,9 @@ import qualified Data.Configurator.Types as ConfigT
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text as Text
+import qualified System.IO as IO
+import qualified System.Directory as Dir
+import qualified Data.List as List
 import System.Exit
 import System.Random
 
@@ -25,6 +28,24 @@ data Attachment = Attachment { name :: String,
                             ownerID :: Integer,
                             mediaID :: Integer,
                             accessKey :: Maybe String } deriving Show
+
+data ConnectionInfo = ConnectionInfo {  key :: String,
+                                        server :: String,
+                                        ts :: String }
+
+instance FromJSON Message where
+   parseJSON = withObject "Message" $ \o -> do
+       ts <- o .: "ts"
+       [updates] <- o .: "updates"
+       object <- updates .: "object"
+       message <- object .: "message"
+       peerID <- message .: "peer_id"
+       text <- message .:? "text"
+       attachments <- message .:? "attachments"
+       return Message { tsMes = ts,
+                        peerID = peerID,
+                        text = text,
+                        attachments = attachments}
 
 instance FromJSON Attachment where
     parseJSON = withObject "Attachment" $ \o -> do
@@ -41,24 +62,6 @@ instance FromJSON Attachment where
                             mediaID = mediaID,
                             accessKey = accessKey}
 
-instance FromJSON Message where
-   parseJSON = withObject "Message" $ \o -> do
-       ts <- o .: "ts"
-       [updates] <- o .: "updates"
-       object <- updates .: "object"
-       message <- object .: "message"
-       peerID <- message .: "peer_id"
-       text <- message .:? "text"
-       attachments <- message .:? "attachments"
-       return Message { tsMes = ts,
-                        peerID = peerID,
-                        text = text,
-                        attachments = attachments}
-
-data ConnectionInfo = ConnectionInfo {  key :: String,
-                                        server :: String,
-                                        ts :: String }
-
 instance FromJSON ConnectionInfo where
     parseJSON = withObject "ConnectionInfo" $ \obj -> do
         response <- obj .: "response"
@@ -69,15 +72,22 @@ instance FromJSON ConnectionInfo where
                                 server = server,
                                 ts = ts}
 
-getConnectionInfo :: ByteString -> ByteString -> IO ConnectionInfo
-getConnectionInfo token groupID = do
-    let path = "/method/groups.getLongPollServer?group_id=" 
-                `BS.append` groupID `BS.append` "&access_token=" 
-                `BS.append` token `BS.append` "&v=5.131"
-        req = setRequestPath path
-            $ setRequestHost "api.vk.com"
+makeRequest :: BS.ByteString -> BS.ByteString -> Query -> IO Request
+makeRequest path host param = do
+    return $ setRequestQueryString param
+            $ setRequestPath path
+            $ setRequestHost host
             $ setRequestPort 443
             $ setRequestSecure True defaultRequest
+
+getConnectionInfo :: ByteString -> ByteString -> IO ConnectionInfo
+getConnectionInfo token groupID = do
+    let path = "/method/groups.getLongPollServer"
+        host = "api.vk.com"
+        param = [("group_id", Just groupID),
+                ("access_token", Just token),
+                ("v", Just "5.131")]
+    req <- makeRequest path host param
     resp <- httpJSON req :: IO (Response Value)
     let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
     case info of
@@ -87,12 +97,12 @@ getConnectionInfo token groupID = do
 getUpdate :: ConnectionInfo -> String -> IO (Maybe Message)
 getUpdate info ts = do
     let path = Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
-                `BS.append` "?act=a_check&key=" `BS.append` Char8.pack (key info) `BS.append` "&ts=" 
-                `BS.append` Char8.pack ts `BS.append` "&wait=25"
-        req = setRequestPath path
-            $ setRequestHost "lp.vk.com"
-            $ setRequestPort 443
-            $ setRequestSecure True defaultRequest
+        host = "lp.vk.com"
+        param = [("act", Just "a_check"),
+                ("key", Just . Char8.pack $ key info),
+                ("ts", Just $ Char8.pack ts),
+                ("wait", Just "25")]
+    req <- makeRequest path host param
     response <- httpJSON req :: IO (Response Value)
     return (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
 
@@ -125,11 +135,8 @@ sendHelp config mes = do
                 ("access_token", Just token),
                 ("v", Just $ toByteString 5.131)]
         path = "/method/messages.send"
-        req = setRequestPath path
-            $ setRequestQueryString param
-            $ setRequestHost "api.vk.com"
-            $ setRequestPort 443
-            $ setRequestSecure True defaultRequest
+        host = "api.vk.com"
+    req <- makeRequest path host param
     resp <- httpJSON req :: IO (Response Value)
     return ()
 
@@ -165,11 +172,8 @@ getRepeatNumFromUser config mes = do
                                             ]]
                             ]
         path = "/method/messages.send"
-        req = setRequestPath path
-            $ setRequestQueryString param
-            $ setRequestHost "api.vk.com"
-            $ setRequestPort 443
-            $ setRequestSecure True defaultRequest
+        host = "api.vk.com"
+    req <- makeRequest path host param
     response <- httpJSON req :: IO (Response Value)
     print response
 
@@ -198,11 +202,8 @@ repeatMessage mes config = do
                 ("access_token", Just token),
                 ("v", Just $ toByteString 5.131)]
         path = "/method/messages.send"
-        req = setRequestPath path
-            $ setRequestQueryString param
-            $ setRequestHost "api.vk.com"
-            $ setRequestPort 443
-            $ setRequestSecure True defaultRequest
+        host = "api.vk.com"
+    req <- makeRequest path host param
     resp <- httpJSON req :: IO (Response Value)
     return ()
     where   toString :: [Attachment] -> String
