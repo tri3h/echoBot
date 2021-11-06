@@ -23,6 +23,7 @@ data Message = Message { tsMes :: String,
                         peerID :: Integer,
                         text :: Maybe String,
                         forward :: Maybe [ForwardID],
+                        geo :: Maybe GeoInfo,
                         attachments :: Maybe [Attachment] } deriving Show
 
 data Attachment = Media { name :: String,
@@ -36,6 +37,9 @@ data ConnectionInfo = ConnectionInfo {  key :: String,
                                         server :: String,
                                         ts :: String } deriving Show
 
+data GeoInfo = GeoInfo { lat :: Float,
+                        long :: Float } deriving Show
+
 newtype ForwardID = ForwardID { forwardID :: Integer } deriving Show
 
 instance FromJSON Message where
@@ -46,11 +50,13 @@ instance FromJSON Message where
        message <- object .: "message"
        peerID <- message .: "peer_id"
        forward <- message .:? "fwd_messages"
+       geo <- message .:? "geo"
        text <- message .:? "text"
        attachments <- message .:? "attachments"
        return Message { tsMes = ts,
                         peerID = peerID,
                         forward = forward,
+                        geo = geo,
                         text = text,
                         attachments = attachments}
 
@@ -58,6 +64,14 @@ instance FromJSON ForwardID where
     parseJSON = withObject "ForwardID" $ \o -> do
         id <- o .: "id"
         return $ ForwardID id
+
+instance FromJSON GeoInfo where
+    parseJSON = withObject "GeoInfo" $ \o -> do
+        coord <- o .: "coordinates"
+        lat <- coord .: "latitude"
+        long <- coord .: "longitude"
+        return $ GeoInfo { lat = lat,
+                        long = long }
 
 instance FromJSON Attachment where
     parseJSON = withObject "Attachment" $ \o -> do
@@ -274,6 +288,12 @@ repeatMessage mes config = do
                     botForwardMessage = case forward mes of
                         Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . forwardID) x)
                         Nothing -> Nothing
+                    latitude = case geo mes of
+                        Just x -> Just . toByteString $ lat x
+                        Nothing -> Nothing
+                    longitude = case geo mes of
+                        Just x -> Just . toByteString $ long x
+                        Nothing -> Nothing
                     param = [("message", botMessage),
                             ("attachment", media),
                             ("forward_messages", botForwardMessage),
@@ -281,6 +301,8 @@ repeatMessage mes config = do
                             ("random_id", Just $ toByteString random),
                             ("access_token", Just token),
                             ("sticker_id", sticker),
+                            ("lat", latitude),
+                            ("long", longitude),
                             ("v", Just $ toByteString 5.131)]
                     path = "/method/messages.send"
                     host = "api.vk.com"
