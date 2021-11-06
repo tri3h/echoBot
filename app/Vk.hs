@@ -22,8 +22,9 @@ import System.Random
 data Message = Message { tsMes :: String,
                         peerID :: Integer,
                         text :: Maybe String,
+                        forward :: Maybe [ForwardID],
                         attachments :: Maybe [Attachment] } deriving Show
- 
+
 data Attachment = Attachment { name :: String,
                             ownerID :: Integer,
                             mediaID :: Integer,
@@ -31,7 +32,9 @@ data Attachment = Attachment { name :: String,
 
 data ConnectionInfo = ConnectionInfo {  key :: String,
                                         server :: String,
-                                        ts :: String }
+                                        ts :: String } deriving Show
+
+newtype ForwardID = ForwardID { getID :: Int} deriving Show
 
 instance FromJSON Message where
    parseJSON = withObject "Message" $ \o -> do
@@ -40,12 +43,19 @@ instance FromJSON Message where
        object <- updates .: "object"
        message <- object .: "message"
        peerID <- message .: "peer_id"
+       forward <- message .:? "fwd_messages"
        text <- message .:? "text"
        attachments <- message .:? "attachments"
        return Message { tsMes = ts,
                         peerID = peerID,
+                        forward = forward,
                         text = text,
                         attachments = attachments}
+
+instance FromJSON ForwardID where
+    parseJSON = withObject "ForwardID" $ \o -> do
+        id <- o .: "id"
+        return $ ForwardID id
 
 instance FromJSON Attachment where
     parseJSON = withObject "Attachment" $ \o -> do
@@ -92,7 +102,7 @@ getConnectionInfo token groupID = do
     let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
     case info of
         Just x -> return x
-        Nothing -> exitFailure 
+        Nothing -> exitFailure
 
 getUpdate :: ConnectionInfo -> String -> IO (Maybe Message)
 getUpdate info ts = do
@@ -111,7 +121,7 @@ getUpdates info config = do
    message <- getUpdate info (ts info)
    get message
     where   get :: Maybe Message -> IO ()
-            get mes = case mes of 
+            get mes = case mes of
                         Just m -> do
                             chooseAnswer config info m
                             newMes <- getUpdate info (tsMes m)
@@ -154,19 +164,19 @@ getRepeatNumFromUser config info mes = do
                 ("v", Just $ toByteString 5.131)]
         buttons =  object ["one_time" .= True,
                             "buttons" .= [[
-                                object ["action" .= object 
+                                object ["action" .= object
                                             ["type" .= ("text" :: String),
                                             "label" .= ("1" :: String)]],
-                                object ["action" .= object 
+                                object ["action" .= object
                                             ["type" .= ("text" :: String),
                                             "label" .= ("2" :: String)]],
-                                object ["action" .= object 
+                                object ["action" .= object
                                             ["type" .= ("text" :: String),
                                             "label" .= ("3" :: String)]],
-                                object ["action" .= object 
+                                object ["action" .= object
                                             ["type" .= ("text" :: String),
                                             "label" .= ("4" :: String)]],
-                                object ["action" .= object 
+                                object ["action" .= object
                                             ["type" .= ("text" :: String),
                                             "label" .= ("5" :: String)]]
                                             ]]
@@ -184,13 +194,13 @@ getRepeatNumFromUser config info mes = do
                 newMes <- getUpdate info ts
                 case newMes of
                     Nothing -> getNewRepeatNum info ts
-                    Just x -> return x 
+                    Just x -> return x
 
-getRepeatNum :: ConfigT.Config -> String -> IO Int 
+getRepeatNum :: ConfigT.Config -> String -> IO Int
 getRepeatNum config id = do
     let path = "repeat_times.id" ++ id
     userTimes <- Config.lookup config $ Text.pack path
-    case userTimes of 
+    case userTimes of
         Just x -> return x
         Nothing -> Config.require config "repeat_times.default"
 
@@ -223,16 +233,15 @@ repeatMessage mes config = do
     repeatNum <- getRepeatNum config (show $ peerID mes)
     send config mes repeatNum
     return ()
-    where   toString :: [Attachment] -> String
-            toString [] = ""
-            toString [x] = makeString x
-            toString (x:xs) = makeString x ++ "," ++ toString xs
+    where   attachmentToString :: [Attachment] -> String
+            attachmentToString [] = ""
+            attachmentToString [x] = makeString x
+            attachmentToString (x:xs) = makeString x ++ "," ++ attachmentToString xs
             makeString :: Attachment -> String
             makeString x = let maybeKey = case accessKey x of
                                             Just key -> "_" ++ key
                                             Nothing -> ""
                             in name x ++ show (ownerID x) ++ "_" ++ show (mediaID x) ++ maybeKey
-
             send :: ConfigT.Config -> Message -> Int -> IO ()
             send _ _ 0 = return ()
             send config mes n = do
@@ -242,13 +251,18 @@ repeatMessage mes config = do
                         Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
                         Nothing -> Nothing
                     botAttachments = case attachments mes of
-                        Just x -> Just . Char8.pack $ toString x
+                        Just x -> Just . Char8.pack $ attachmentToString x
+                        Nothing -> Nothing
+                    botForwardMessage = case forward mes of
+                        Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . getID) x)
                         Nothing -> Nothing
                     param = [("message", botMessage),
                             ("attachment", botAttachments),
+                            ("forward_messages", botForwardMessage),
                             ("peer_id", Just $ toByteString $ peerID mes),
                             ("random_id", Just $ toByteString random),
                             ("access_token", Just token),
+                            ("dont_parse_links", Just "0"),
                             ("v", Just $ toByteString 5.131)]
                     path = "/method/messages.send"
                     host = "api.vk.com"
