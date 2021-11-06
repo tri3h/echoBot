@@ -25,16 +25,18 @@ data Message = Message { tsMes :: String,
                         forward :: Maybe [ForwardID],
                         attachments :: Maybe [Attachment] } deriving Show
 
-data Attachment = Attachment { name :: String,
+data Attachment = Media { name :: String,
                             ownerID :: Integer,
                             mediaID :: Integer,
-                            accessKey :: Maybe String } deriving Show
+                            accessKey :: Maybe String } 
+                | Sticker { stickerID :: Integer}
+                deriving Show
 
 data ConnectionInfo = ConnectionInfo {  key :: String,
                                         server :: String,
                                         ts :: String } deriving Show
 
-newtype ForwardID = ForwardID { getID :: Int} deriving Show
+newtype ForwardID = ForwardID { forwardID :: Integer } deriving Show
 
 instance FromJSON Message where
    parseJSON = withObject "Message" $ \o -> do
@@ -61,13 +63,18 @@ instance FromJSON Attachment where
     parseJSON = withObject "Attachment" $ \o -> do
         name <- o .: "type"
         media <- o .: Text.pack name
-        id <- media .:? "owner_id" :: Parser (Maybe Integer)
-        ownerID <- case id of
-                Just x -> media .: "owner_id"
-                Nothing -> media .: "to_id"
-        mediaID <- media .: "id"
-        accessKey <- media .:? "access_key"
-        return Attachment { name = name,
+        case name of 
+            "sticker" -> do
+                id <- media .: "sticker_id"
+                return Sticker { stickerID = id }
+            _ -> do
+                id <- media .:? "owner_id" :: Parser (Maybe Integer)
+                ownerID <- case id of
+                    Just x -> media .: "owner_id"
+                    Nothing -> media .: "to_id"
+                mediaID <- media .: "id"
+                accessKey <- media .:? "access_key"
+                return Media { name = name,
                             ownerID = ownerID,
                             mediaID = mediaID,
                             accessKey = accessKey}
@@ -233,15 +240,23 @@ repeatMessage mes config = do
     repeatNum <- getRepeatNum config (show $ peerID mes)
     send config mes repeatNum
     return ()
-    where   attachmentToString :: [Attachment] -> String
-            attachmentToString [] = ""
-            attachmentToString [x] = makeString x
-            attachmentToString (x:xs) = makeString x ++ "," ++ attachmentToString xs
+    where   mediaToString :: [Attachment] -> String
+            mediaToString [] = ""
+            mediaToString [x] = makeString x
+            mediaToString (x:xs) = makeString x ++ "," ++ mediaToString xs
             makeString :: Attachment -> String
             makeString x = let maybeKey = case accessKey x of
                                             Just key -> "_" ++ key
                                             Nothing -> ""
                             in name x ++ show (ownerID x) ++ "_" ++ show (mediaID x) ++ maybeKey
+            getMedia :: [Attachment] -> [Attachment]
+            getMedia [] = []
+            getMedia (m@Media {} : xs) = m : getMedia xs
+            getMedia (_:xs) = getMedia xs
+            getSticker :: [Attachment] -> ByteString
+            getSticker [] = ""
+            getSticker (Sticker s: xs) = toByteString s
+            getSticker (_:xs) = getSticker xs
             send :: ConfigT.Config -> Message -> Int -> IO ()
             send _ _ 0 = return ()
             send config mes n = do
@@ -250,19 +265,22 @@ repeatMessage mes config = do
                 let botMessage = case text mes of
                         Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
                         Nothing -> Nothing
-                    botAttachments = case attachments mes of
-                        Just x -> Just . Char8.pack $ attachmentToString x
+                    media = case attachments mes of
+                       Just x -> Just . Char8.pack . mediaToString $ getMedia x
+                       Nothing -> Nothing
+                    sticker = case attachments mes of
+                        Just x -> Just $ getSticker x
                         Nothing -> Nothing
                     botForwardMessage = case forward mes of
-                        Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . getID) x)
+                        Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . forwardID) x)
                         Nothing -> Nothing
                     param = [("message", botMessage),
-                            ("attachment", botAttachments),
+                            ("attachment", media),
                             ("forward_messages", botForwardMessage),
-                            ("peer_id", Just $ toByteString $ peerID mes),
+                            ("peer_id", Just . toByteString $ peerID mes),
                             ("random_id", Just $ toByteString random),
                             ("access_token", Just token),
-                            ("dont_parse_links", Just "0"),
+                            ("sticker_id", sticker),
                             ("v", Just $ toByteString 5.131)]
                     path = "/method/messages.send"
                     host = "api.vk.com"
