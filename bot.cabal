@@ -46,9 +46,9 @@ library
 executable bot-exe
   main-is: Main.hs
   other-modules:
-      Handlers.Tg
-      Handlers.Vk
       Logger
+      Handlers.Tg
+      Handle
       Tg
       Vk
       Paths_bot
