@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Vk where
+module App.Vk where
 
 import Data.Aeson.Types
 import Data.Aeson

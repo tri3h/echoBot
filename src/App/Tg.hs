@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Tg where
+module App.Tg where
 
-import qualified Handlers.Tg as Handler
+import qualified App.Handlers.Tg as Handler
 
 import qualified Data.Configurator as Config
 import qualified System.IO as IO

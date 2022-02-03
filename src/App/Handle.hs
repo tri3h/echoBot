@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Handle where
+module App.Handle where
 
 data Config = Config {
 path :: FilePath,

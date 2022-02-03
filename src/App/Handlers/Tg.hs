@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
  
-module Handlers.Tg where
+module App.Handlers.Tg where
  
 import Network.HTTP.Simple
 import qualified Data.ByteString as BS
