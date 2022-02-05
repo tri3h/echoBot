@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: f768dcdc2c21ef4c752940f9e27f444b11a3f3b97cadac39bbe7b7eb58b5cf17
+-- hash: 802c07419e8da24351bafadd84858fd35c5b8771b32bea69d85e8e627d605180
 
 name:           bot
 version:        0.1.0.0
@@ -27,7 +27,9 @@ source-repository head
 
 library
   exposed-modules:
-      App.Handle
+      App.ChangeRepeatNum
+      App.Handlers.Bot
+      App.Handlers.ChangeRepeatNum
       App.Handlers.Tg
       App.Tg
       App.Vk

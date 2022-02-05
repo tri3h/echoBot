@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module App.Handle where
+module App.Bot where
 
 type UserID = Integer
 
