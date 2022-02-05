@@ -2,55 +2,57 @@
 
 module App.Handle where
 
-{-
-data Config = Config {
-path :: FilePath,
-repeatText :: String,
-helpText :: String
-}
--}
+type UserID = Integer
 
-data Handle m a b = Handle {
---hConfig :: Config,
-getMessage :: a -> m b,
-getText :: b -> String,
-makeHelpReq :: b -> m a,
-makeRepeatNumReq :: b -> m a,
-makeRepeatReq :: b -> m a,
-makeMessageReq :: Maybe b -> m a,
-setRepeatNum :: b -> m b,
-getRepeatNum :: Maybe b -> m Int
+data Handle m req mes = Handle {
+getMessage :: req -> m mes,
+makeUpdateReq :: Maybe mes -> m req,
+makeHelpReq :: mes -> m req,
+makeRepeatReq :: mes -> m req,
+makeRepeatQuestionReq :: mes -> m req,
+getText :: mes -> m String,
+getUserID :: mes -> m UserID,
+getRepeatNum :: UserID -> m Integer,
+setRepeatNum :: UserID -> Integer -> m ()
 }
 
-getUpdate :: Monad m => Handle m a b -> Maybe b -> m b
+getUpdate :: Monad m => Handle m req mes -> Maybe mes -> m mes
 getUpdate handle mes = do
-    req <- makeMessageReq handle mes
+    req <- makeUpdateReq handle mes
     newMes <- getMessage handle req
     chooseAnswer handle newMes
 
-chooseAnswer :: Monad m => Handle m a b -> b -> m b
-chooseAnswer handle mes = case getText handle mes of
-    "/help" -> sendHelp handle mes
-    "/repeat" -> changeRepeatNum handle mes
-    _ -> repeatMessage handle mes 
+chooseAnswer :: Monad m => Handle m req mes -> mes -> m mes
+chooseAnswer handle mes = do
+    text <- getText handle mes
+    case text of
+        "/help" -> sendHelp handle mes
+        "/repeat" -> changeRepeatNum handle mes
+        _ -> repeatMessage handle mes 
 
-sendHelp :: Monad m => Handle m a b -> b -> m b
+sendHelp :: Monad m => Handle m req mes -> mes -> m mes
 sendHelp handle mes = do
     req <- makeHelpReq handle mes
     getMessage handle req
 
-changeRepeatNum :: Monad m => Handle m a b -> b -> m b
+changeRepeatNum :: Monad m => Handle m req mes -> mes -> m mes
 changeRepeatNum handle mes = do
-    req <- makeRepeatNumReq handle mes
+    req <- makeRepeatQuestionReq handle mes
     numMes <- getMessage handle req
-    setRepeatNum handle numMes
+    num <- getText handle numMes
+    userID <- getUserID handle numMes
+    setRepeatNum handle userID (read num :: Integer)
+    return numMes
 
-repeatMessage :: Monad m => Handle m a b -> b -> m b
+repeatMessage :: Monad m => Handle m req mes -> mes -> m mes
 repeatMessage handle mes = do
-    num <- getRepeatNum handle (Just mes)
-    req <- makeRepeatReq handle mes
-    send handle req num
-    where send handle req 1 = getMessage handle req
-          send handle req n = do
+    userID <- getUserID handle mes
+    num <- getRepeatNum handle userID
+    repeat handle num
+    where repeat handle 1 = send
+          repeat handle n = do
+              send
+              repeat handle (n-1)
+          send = do
+              req <- makeRepeatReq handle mes
               getMessage handle req
-              send handle req (n-1)
