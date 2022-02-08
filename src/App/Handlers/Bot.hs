@@ -1,53 +1,60 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module App.Bot where
+module App.Handlers.Bot where
 
 type UserID = Integer
 
 data Handle m req mes = Handle {
-getMessage :: req -> m mes,
+getMessage :: req -> m (Maybe mes),
 makeUpdateReq :: Maybe mes -> m req,
 makeHelpReq :: mes -> m req,
 makeRepeatReq :: mes -> m req,
 makeRepeatQuestionReq :: mes -> m req,
-getText :: mes -> m String,
-getUserID :: mes -> m UserID,
-getRepeatNum :: UserID -> m Integer,
-setRepeatNum :: UserID -> Integer -> m ()
+getText :: mes -> String,
+getUserID :: mes -> UserID,
+getRepeatNum :: UserID -> Integer,
+setRepeatNum :: UserID -> Integer -> ()
 }
 
 getUpdate :: Monad m => Handle m req mes -> Maybe mes -> m mes
 getUpdate handle mes = do
     req <- makeUpdateReq handle mes
     newMes <- getMessage handle req
-    chooseAnswer handle newMes
+    case newMes of
+        Just m -> do
+            chooseAnswer handle m
+            getUpdate handle newMes
+        Nothing -> getUpdate handle newMes
 
-chooseAnswer :: Monad m => Handle m req mes -> mes -> m mes
+chooseAnswer :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 chooseAnswer handle mes = do
-    text <- getText handle mes
+    let text = getText handle mes
     case text of
         "/help" -> sendHelp handle mes
         "/repeat" -> changeRepeatNum handle mes
         _ -> repeatMessage handle mes 
 
-sendHelp :: Monad m => Handle m req mes -> mes -> m mes
+sendHelp :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 sendHelp handle mes = do
     req <- makeHelpReq handle mes
     getMessage handle req
 
-changeRepeatNum :: Monad m => Handle m req mes -> mes -> m mes
+changeRepeatNum :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 changeRepeatNum handle mes = do
     req <- makeRepeatQuestionReq handle mes
     numMes <- getMessage handle req
-    num <- getText handle numMes
-    userID <- getUserID handle numMes
-    setRepeatNum handle userID (read num :: Integer)
-    return numMes
+    case numMes of
+        Just m -> do
+            let num = getText handle m
+            let userID = getUserID handle m
+            let n = setRepeatNum handle userID (read num :: Integer)
+            return numMes
+        Nothing -> return numMes
 
-repeatMessage :: Monad m => Handle m req mes -> mes -> m mes
+repeatMessage :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 repeatMessage handle mes = do
-    userID <- getUserID handle mes
-    num <- getRepeatNum handle userID
+    let userID = getUserID handle mes
+    let num = getRepeatNum handle userID
     repeat handle num
     where repeat handle 1 = send
           repeat handle n = do

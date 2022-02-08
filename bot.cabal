@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 802c07419e8da24351bafadd84858fd35c5b8771b32bea69d85e8e627d605180
+-- hash: a26d48349b4cfc5575a0b2a7c305c0d1238f97b63cc4da13bdb9e5a402901a2e
 
 name:           bot
 version:        0.1.0.0
@@ -43,9 +43,11 @@ library
     , base >=4.7 && <5
     , bytestring
     , configurator
+    , containers
     , directory
     , hspec
     , http-conduit
+    , mtl
     , random
     , text
   default-language: Haskell2010
@@ -64,9 +66,11 @@ executable bot-exe
     , bot
     , bytestring
     , configurator
+    , containers
     , directory
     , hspec
     , http-conduit
+    , mtl
     , random
     , text
   default-language: Haskell2010
@@ -85,9 +89,11 @@ test-suite bot-test
     , bot
     , bytestring
     , configurator
+    , containers
     , directory
     , hspec
     , http-conduit
+    , mtl
     , random
     , text
   default-language: Haskell2010

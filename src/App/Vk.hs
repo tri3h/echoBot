@@ -2,22 +2,25 @@
 
 module App.Vk where
 
+import qualified App.Handlers.Bot as H 
 import Data.Aeson.Types
-import Data.Aeson
+import Data.Aeson ( encode )
 import Network.HTTP.Simple
+import qualified Data.Map as Map
+import Control.Monad.State.Lazy
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
-import Data.ByteString.Internal
+import Data.ByteString.Internal ( ByteString )
 import qualified Data.Configurator as Config
-import qualified Data.Configurator.Types as ConfigT
+import qualified Data.Configurator.Types as C
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text as Text
 import qualified System.IO as IO
 import qualified System.Directory as Dir
 import qualified Data.List as List
-import System.Exit
-import System.Random
+import System.Exit ( exitFailure )
+import System.Random ( Random(randomRIO) )
 
 data Message = Message { tsMes :: String,
                         peerID :: Integer,
@@ -103,14 +106,6 @@ instance FromJSON ConnectionInfo where
                                 server = server,
                                 ts = ts}
 
-makeRequest :: BS.ByteString -> BS.ByteString -> Query -> IO Request
-makeRequest path host param = do
-    return $ setRequestQueryString param
-            $ setRequestPath path
-            $ setRequestHost host
-            $ setRequestPort 443
-            $ setRequestSecure True defaultRequest
-
 getConnectionInfo :: ByteString -> ByteString -> IO ConnectionInfo
 getConnectionInfo token groupID = do
     let path = "/method/groups.getLongPollServer"
@@ -125,40 +120,34 @@ getConnectionInfo token groupID = do
         Just x -> return x
         Nothing -> exitFailure
 
-getUpdate :: ConnectionInfo -> String -> IO (Maybe Message)
-getUpdate info ts = do
-    let path = Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
-        host = "lp.vk.com"
-        param = [("act", Just "a_check"),
-                ("key", Just . Char8.pack $ key info),
-                ("ts", Just $ Char8.pack ts),
-                ("wait", Just "25")]
-    req <- makeRequest path host param
+getMessage :: Request -> IO (Maybe Message)
+getMessage req = do
     response <- httpJSON req :: IO (Response Value)
     return (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
 
-getUpdates :: ConnectionInfo -> ConfigT.Config -> IO ()
-getUpdates info config = do
-   message <- getUpdate info (ts info)
-   get message
-    where   get :: Maybe Message -> IO ()
-            get mes = case mes of
-                        Just m -> do
-                            chooseAnswer config info m
-                            newMes <- getUpdate info (tsMes m)
-                            get newMes
-                        Nothing -> getUpdates info config
+makeRequest :: BS.ByteString -> BS.ByteString -> Query -> IO Request
+makeRequest path host param = do
+    return $ setRequestQueryString param
+            $ setRequestPath path
+            $ setRequestHost host
+            $ setRequestPort 443
+            $ setRequestSecure True defaultRequest
 
-chooseAnswer :: ConfigT.Config -> ConnectionInfo -> Message -> IO ()
-chooseAnswer config info mes = case text mes of
-               Just "/help" -> sendHelp config mes
-               Just "/repeat" -> getRepeatNumFromUser config info mes
-               _ -> repeatMessage mes config
+makeUpdateReq :: ConnectionInfo -> Maybe Message -> IO Request
+makeUpdateReq info mes = do
+    let ts' = case mes of
+            Just m -> tsMes m
+            Nothing -> ts info
+        path = Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
+        host = "lp.vk.com"
+        param = [("act", Just "a_check"),
+                ("key", Just . Char8.pack $ key info),
+                ("ts", Just $ Char8.pack ts'),
+                ("wait", Just "25")]
+    makeRequest path host param
 
-sendHelp :: ConfigT.Config -> Message -> IO ()
-sendHelp config mes = do
-    helpText <- Config.require config "help_text"
-    token <- Config.require config "token"
+makeHelpReq :: ByteString -> ByteString -> Message -> IO Request 
+makeHelpReq token helpText mes = do
     random <- randomRIO (0, 100000000) :: IO Integer
     let param = [("message", Just helpText),
                 ("peer_id", Just $ toByteString $ peerID mes),
@@ -167,18 +156,69 @@ sendHelp config mes = do
                 ("v", Just $ toByteString 5.131)]
         path = "/method/messages.send"
         host = "api.vk.com"
-    req <- makeRequest path host param
-    resp <- httpJSON req :: IO (Response Value)
-    return ()
+    makeRequest path host param
 
-getRepeatNumFromUser :: ConfigT.Config -> ConnectionInfo -> Message -> IO ()
-getRepeatNumFromUser config info mes = do
-    oldRepeat <- getRepeatNum config (show $ peerID mes)
-    token <- Config.require config "token"
-    repeatText <- Config.require config "repeat_text"
+makeRepeatReq :: ByteString -> Message -> IO Request
+makeRepeatReq token mes = do
+    random <- randomRIO (0, 100000000) :: IO Integer
+    let botMessage = case text mes of
+            Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
+            Nothing -> Nothing
+        botForwardMessage = case forward mes of
+            Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . forwardID) x)
+            Nothing -> Nothing
+        latitude = case geo mes of
+            Just x -> Just . toByteString $ lat x
+            Nothing -> Nothing
+        longitude = case geo mes of
+            Just x -> Just . toByteString $ long x
+            Nothing -> Nothing
+        param = [("message", botMessage),
+                ("attachment", mediaToBS mes),
+                ("forward_messages", botForwardMessage),
+                ("peer_id", Just . toByteString $ peerID mes),
+                ("random_id", Just $ toByteString random),
+                ("access_token", Just token),
+                ("sticker_id", stickerToBS mes),
+                ("lat", latitude),
+                ("long", longitude),
+                ("v", Just $ toByteString 5.131)]
+        path = "/method/messages.send"
+        host = "api.vk.com"
+    makeRequest path host param
+        
+mediaToBS :: Message -> Maybe ByteString
+mediaToBS mes = case attachments mes of
+            Just x -> Just . Char8.pack . mediaToString $ getMedia x
+            Nothing -> Nothing
+    where mediaToString :: [Attachment] -> String
+          mediaToString [] = ""
+          mediaToString [x] = makeString x
+          mediaToString (x:xs) = makeString x ++ "," ++ mediaToString xs
+          makeString :: Attachment -> String
+          makeString x = let maybeKey = case accessKey x of
+                                        Just key -> "_" ++ key
+                                        Nothing -> ""
+                            in name x ++ show (ownerID x) ++ "_" ++ show (mediaID x) ++ maybeKey
+          getMedia :: [Attachment] -> [Attachment]
+          getMedia [] = []
+          getMedia (m@Media {} : xs) = m : getMedia xs
+          getMedia (_:xs) = getMedia xs
+
+stickerToBS :: Message -> Maybe ByteString
+stickerToBS mes = case attachments mes of
+            Just x -> Just $ getSticker x
+            Nothing -> Nothing
+    where getSticker :: [Attachment] -> ByteString
+          getSticker [] = ""
+          getSticker (Sticker s: xs) = toByteString s
+          getSticker (_:xs) = getSticker xs
+
+makeRepeatQuestionReq :: ByteString -> ByteString -> Integer -> Message -> IO Request 
+makeRepeatQuestionReq token repeatText repeatNum mes = do
     random <- randomRIO (0, 100000000) :: IO Integer
     let param = [("keyboard", Just $ BSL.toStrict $ encode buttons),
-                ("message", Just $ repeatText `BS.append` toByteString oldRepeat),
+                ("message", Just $ repeatText `BS.append` toByteString repeatNum),
                 ("peer_id", Just $ toByteString $ peerID mes),
                 ("random_id", Just $ toByteString random),
                 ("access_token", Just token),
@@ -204,111 +244,25 @@ getRepeatNumFromUser config info mes = do
                             ]
         path = "/method/messages.send"
         host = "api.vk.com"
-    req <- makeRequest path host param
-    confirmMes <- httpJSON req :: IO (Response Value)
-    repeatNumMes <- getNewRepeatNum info (tsMes mes)
-    case text repeatNumMes of
-        Just x -> changeRepeatNum config x (show $ peerID repeatNumMes)
-        Nothing -> return ()
-    where   getNewRepeatNum :: ConnectionInfo -> String -> IO Message
-            getNewRepeatNum info ts = do
-                newMes <- getUpdate info ts
-                case newMes of
-                    Nothing -> getNewRepeatNum info ts
-                    Just x -> return x
+    makeRequest path host param
 
-getRepeatNum :: ConfigT.Config -> String -> IO Int
-getRepeatNum config id = do
-    let path = "repeat_times.id" ++ id
-    userTimes <- Config.lookup config $ Text.pack path
-    case userTimes of
-        Just x -> return x
-        Nothing -> Config.require config "repeat_times.default"
+getRepeatNum :: Map.Map H.UserID Integer -> Integer -> H.UserID -> Integer
+getRepeatNum m defNum user = 
+    case evalState (get' user) m of
+        Just x -> x
+        Nothing -> defNum
+    where get' :: H.UserID -> State (Map.Map H.UserID Integer) (Maybe Integer) 
+          get' user =  do 
+              m <- get 
+              return $ Map.lookup user m
 
-changeRepeatNum :: ConfigT.Config -> String -> String -> IO ()
-changeRepeatNum config val id = do
-           let path = "botVK.config"
-               name = "id" ++ id
-           handle <- IO.openFile path IO.ReadMode
-           contents <- IO.hGetContents handle
-           let linedContents = lines contents
-               indexUser = List.findIndex (List.isInfixOf name) linedContents
-               indexDefault = List.findIndex (List.isInfixOf "default") linedContents
-               newContents = case indexUser of
-                       Just x -> let (a, b) = splitAt x linedContents
-                                in unlines $ a ++ [name ++ " = " ++ val] ++ tail b
-                       Nothing -> case indexDefault of
-                                   Just x -> let (a, b) = splitAt x linedContents
-                                       in unlines $ a ++ [name ++ " = " ++ val] ++ b
-                                   Nothing -> contents
-           (tempName, tempHandle) <- IO.openTempFile "." "temp"
-           IO.hPutStr tempHandle newContents
-           IO.hClose handle
-           IO.hClose tempHandle
-           Dir.removeFile path
-           Dir.renameFile tempName path
-           Config.reload config
-
-repeatMessage :: Message -> ConfigT.Config -> IO ()
-repeatMessage mes config = do
-    repeatNum <- getRepeatNum config (show $ peerID mes)
-    send config mes repeatNum
-    return ()
-    where   mediaToString :: [Attachment] -> String
-            mediaToString [] = ""
-            mediaToString [x] = makeString x
-            mediaToString (x:xs) = makeString x ++ "," ++ mediaToString xs
-            makeString :: Attachment -> String
-            makeString x = let maybeKey = case accessKey x of
-                                            Just key -> "_" ++ key
-                                            Nothing -> ""
-                            in name x ++ show (ownerID x) ++ "_" ++ show (mediaID x) ++ maybeKey
-            getMedia :: [Attachment] -> [Attachment]
-            getMedia [] = []
-            getMedia (m@Media {} : xs) = m : getMedia xs
-            getMedia (_:xs) = getMedia xs
-            getSticker :: [Attachment] -> ByteString
-            getSticker [] = ""
-            getSticker (Sticker s: xs) = toByteString s
-            getSticker (_:xs) = getSticker xs
-            send :: ConfigT.Config -> Message -> Int -> IO ()
-            send _ _ 0 = return ()
-            send config mes n = do
-                token <- Config.require config "token"
-                random <- randomRIO (0, 100000000) :: IO Integer
-                let botMessage = case text mes of
-                        Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
-                        Nothing -> Nothing
-                    media = case attachments mes of
-                       Just x -> Just . Char8.pack . mediaToString $ getMedia x
-                       Nothing -> Nothing
-                    sticker = case attachments mes of
-                        Just x -> Just $ getSticker x
-                        Nothing -> Nothing
-                    botForwardMessage = case forward mes of
-                        Just x -> (Just . Char8.pack) (concatMap ((\x -> show x ++ ",") . forwardID) x)
-                        Nothing -> Nothing
-                    latitude = case geo mes of
-                        Just x -> Just . toByteString $ lat x
-                        Nothing -> Nothing
-                    longitude = case geo mes of
-                        Just x -> Just . toByteString $ long x
-                        Nothing -> Nothing
-                    param = [("message", botMessage),
-                            ("attachment", media),
-                            ("forward_messages", botForwardMessage),
-                            ("peer_id", Just . toByteString $ peerID mes),
-                            ("random_id", Just $ toByteString random),
-                            ("access_token", Just token),
-                            ("sticker_id", sticker),
-                            ("lat", latitude),
-                            ("long", longitude),
-                            ("v", Just $ toByteString 5.131)]
-                    path = "/method/messages.send"
-                    host = "api.vk.com"
-                req <- makeRequest path host param
-                httpJSON req :: IO (Response Value)
-                send config mes $ n-1
+setRepeatNum :: Map.Map H.UserID Integer -> H.UserID -> Integer -> ()
+setRepeatNum m user num = evalState (set user num) m
+    where   set :: H.UserID -> Integer -> State (Map.Map H.UserID Integer) ()
+            set user num = do 
+                    m <- get
+                    put $ Map.insert user num m 
+                    return ()
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
@@ -318,5 +272,25 @@ main = do
     config <- Config.load [Config.Required "botVK.config"]
     token <- Config.require config "token"
     groupID <- Config.require config "group_id"
+    helpText <- Config.require config "help_text"
+    repeatText <- Config.require config "repeat_text"
+    defaultNum <- Config.require config "repeat_times.default" 
     info <- getConnectionInfo token groupID
-    getUpdates info config
+    let repeatNums = Map.empty
+    let handle = H.Handle {
+    H.getMessage = getMessage,
+    H.makeUpdateReq = makeUpdateReq info,
+    H.makeHelpReq = makeHelpReq token helpText,
+    H.makeRepeatReq = makeRepeatReq token,
+    H.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText 5,
+    H.getText = \mes -> case text mes of
+                            Just m -> m
+                            Nothing -> "",
+    H.getUserID = peerID,
+    H.getRepeatNum = getRepeatNum repeatNums defaultNum,
+    H.setRepeatNum = setRepeatNum repeatNums
+    }
+    H.getUpdate handle Nothing
+    return ()
+
+
