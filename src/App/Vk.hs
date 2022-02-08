@@ -282,7 +282,9 @@ main = do
     H.makeUpdateReq = makeUpdateReq info,
     H.makeHelpReq = makeHelpReq token helpText,
     H.makeRepeatReq = makeRepeatReq token,
-    H.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText 5,
+    H.makeRepeatQuestionReq = \mes -> do
+        let num = getRepeatNum repeatNums defaultNum $ peerID mes
+        makeRepeatQuestionReq token repeatText num mes,
     H.getText = \mes -> case text mes of
                             Just m -> m
                             Nothing -> "",
@@ -292,5 +294,3 @@ main = do
     }
     H.getUpdate handle Nothing
     return ()
-
-
