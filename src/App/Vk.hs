@@ -7,20 +7,17 @@ import Data.Aeson.Types
 import Data.Aeson ( encode )
 import Network.HTTP.Simple
 import qualified Data.Map as Map
-import Control.Monad.State.Lazy
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.ByteString.Internal ( ByteString )
 import qualified Data.Configurator as Config
-import qualified Data.Configurator.Types as C
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text as Text
-import qualified System.IO as IO
-import qualified System.Directory as Dir
 import qualified Data.List as List
 import System.Exit ( exitFailure )
 import System.Random ( Random(randomRIO) )
+import Data.IORef 
 
 data Message = Message { tsMes :: String,
                         peerID :: Integer,
@@ -246,23 +243,15 @@ makeRepeatQuestionReq token repeatText repeatNum mes = do
         host = "api.vk.com"
     makeRequest path host param
 
-getRepeatNum :: Map.Map H.UserID Integer -> Integer -> H.UserID -> Integer
-getRepeatNum m defNum user = 
-    case evalState (get' user) m of
-        Just x -> x
-        Nothing -> defNum
-    where get' :: H.UserID -> State (Map.Map H.UserID Integer) (Maybe Integer) 
-          get' user =  do 
-              m <- get 
-              return $ Map.lookup user m
-
-setRepeatNum :: Map.Map H.UserID Integer -> H.UserID -> Integer -> ()
-setRepeatNum m user num = evalState (set user num) m
-    where   set :: H.UserID -> Integer -> State (Map.Map H.UserID Integer) ()
-            set user num = do 
-                    m <- get
-                    put $ Map.insert user num m 
-                    return ()
+getRepeatNum :: IORef (Map.Map H.UserID Integer) -> Integer -> H.UserID -> IO Integer
+getRepeatNum ref defNum user = do
+    m <- readIORef ref
+    case Map.lookup user m of
+        Just x -> return x
+        Nothing -> return defNum
+    
+setRepeatNum :: IORef (Map.Map H.UserID Integer) -> H.UserID -> Integer -> IO ()
+setRepeatNum ref user num = modifyIORef' ref (Map.insert user num)
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
@@ -276,14 +265,14 @@ main = do
     repeatText <- Config.require config "repeat_text"
     defaultNum <- Config.require config "repeat_times.default" 
     info <- getConnectionInfo token groupID
-    let repeatNums = Map.empty
+    repeatNums <- newIORef Map.empty
     let handle = H.Handle {
     H.getMessage = getMessage,
     H.makeUpdateReq = makeUpdateReq info,
     H.makeHelpReq = makeHelpReq token helpText,
     H.makeRepeatReq = makeRepeatReq token,
     H.makeRepeatQuestionReq = \mes -> do
-        let num = getRepeatNum repeatNums defaultNum $ peerID mes
+        num <- getRepeatNum repeatNums defaultNum $ peerID mes
         makeRepeatQuestionReq token repeatText num mes,
     H.getText = \mes -> case text mes of
                             Just m -> m

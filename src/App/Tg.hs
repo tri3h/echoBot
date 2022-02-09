@@ -4,17 +4,14 @@ module App.Tg where
 
 import qualified App.Handlers.Bot as H
 import qualified Data.Configurator as Config
-import qualified System.IO as IO
-import qualified System.Directory as Dir
-import qualified Network.HTTP.Simple as Net
+import Network.HTTP.Simple
 import qualified Data.Text as Text
 import qualified Data.List as List
-import Control.Monad.State.Lazy
-import Network.HTTP.Simple
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import Data.Aeson.Types
 import qualified Data.Map as Map
+import Data.IORef 
 
 data Message = Message { updateID :: Integer,
                         chatID :: Integer,
@@ -92,23 +89,18 @@ makeRepeatQuestionReq token repeatText num mes = do
                     path = "/bot" `BS.append` token `BS.append` "/sendMessage"
                 makeRequest path params buttons
 
-getRepeatNum :: Map.Map H.UserID Integer -> Integer -> H.UserID -> Integer
-getRepeatNum m defNum user = 
-    case evalState (get' user) m of
-        Just x -> x
-        Nothing -> defNum
-    where get' :: H.UserID -> State (Map.Map H.UserID Integer) (Maybe Integer) 
-          get' user =  do 
-              m <- get 
-              return $ Map.lookup user m
-
-setRepeatNum :: Map.Map H.UserID Integer -> H.UserID -> Integer -> ()
-setRepeatNum m user num = evalState (set user num) m
-    where   set :: H.UserID -> Integer -> State (Map.Map H.UserID Integer) ()
-            set user num = do 
-                    m <- get
-                    put $ Map.insert user num m 
-                    return ()
+getRepeatNum :: IORef (Map.Map H.UserID Integer) -> Integer -> H.UserID -> IO Integer
+getRepeatNum ref defNum user = do
+    m <- readIORef ref
+    case Map.lookup user m of
+        Just x -> return x
+        Nothing -> return defNum
+    
+setRepeatNum :: IORef (Map.Map H.UserID Integer) -> H.UserID -> Integer -> IO ()
+setRepeatNum ref user num = do 
+    modifyIORef' ref (Map.insert user num)
+    m <- readIORef ref 
+    print m
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
@@ -120,14 +112,14 @@ main = do
     helpText <- Config.require config "help_text"
     repeatText <- Config.require config "repeat_text"
     defaultNum <- Config.require config "repeat_times.default" 
-    let repeatNums = Map.empty
+    repeatNums <- newIORef Map.empty
     let handle = H.Handle {
         H.getMessage = getMessage,
         H.makeUpdateReq = makeUpdateReq token,
         H.makeHelpReq = makeHelpReq token helpText,
         H.makeRepeatReq = makeRepeatReq token,
         H.makeRepeatQuestionReq = \mes -> do
-            let num = getRepeatNum repeatNums defaultNum $ chatID mes
+            num <- getRepeatNum repeatNums defaultNum $ chatID mes
             makeRepeatQuestionReq token repeatText num mes,
         H.getText = \mes -> case text mes of
                             Just m -> m

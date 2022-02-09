@@ -12,8 +12,8 @@ makeRepeatReq :: mes -> m req,
 makeRepeatQuestionReq :: mes -> m req,
 getText :: mes -> String,
 getUserID :: mes -> UserID,
-getRepeatNum :: UserID -> Integer,
-setRepeatNum :: UserID -> Integer -> ()
+getRepeatNum :: UserID -> m Integer,
+setRepeatNum :: UserID -> Integer -> m ()
 }
 
 getUpdate :: Monad m => Handle m req mes -> Maybe mes -> m mes
@@ -41,20 +41,26 @@ sendHelp handle mes = do
 
 changeRepeatNum :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 changeRepeatNum handle mes = do
-    req <- makeRepeatQuestionReq handle mes
-    numMes <- getMessage handle req
+    req1 <- makeRepeatQuestionReq handle mes
+    confirmMes1 <- getMessage handle req1
+    req2 <- makeUpdateReq handle confirmMes1
+    confirmMes2 <- getMessage handle req2
+    numReq <- makeUpdateReq handle confirmMes2
+    numMes <- getMessage handle numReq
+    req3 <- makeUpdateReq handle numMes
+    confirmMes3 <- getMessage handle req3
     case numMes of
         Just m -> do
             let num = getText handle m
             let userID = getUserID handle m
-            let n = setRepeatNum handle userID (read num :: Integer)
+            setRepeatNum handle userID (read num :: Integer)
             return numMes
         Nothing -> return numMes
 
 repeatMessage :: Monad m => Handle m req mes -> mes -> m (Maybe mes)
 repeatMessage handle mes = do
     let userID = getUserID handle mes
-    let num = getRepeatNum handle userID
+    num <- getRepeatNum handle userID
     repeat handle num
     where repeat handle 1 = send
           repeat handle n = do
