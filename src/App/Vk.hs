@@ -269,7 +269,7 @@ toByteString x = Char8.pack $ show x
 
 main :: IO ()
 main = do
-    config <- Config.load [Config.Required "botVK.config"]
+    config <- Config.load [Config.Required "VK.config"]
     token <- Config.require config "token"
     groupID <- Config.require config "group_id"
     helpText <- Config.require config "help_text"

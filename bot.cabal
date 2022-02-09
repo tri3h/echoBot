@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a26d48349b4cfc5575a0b2a7c305c0d1238f97b63cc4da13bdb9e5a402901a2e
+-- hash: 60a63f45a39a122fa9e72cd4db18156341357b939d5ab5a3611975761a1cb722
 
 name:           bot
 version:        0.1.0.0
@@ -27,10 +27,7 @@ source-repository head
 
 library
   exposed-modules:
-      App.ChangeRepeatNum
       App.Handlers.Bot
-      App.Handlers.ChangeRepeatNum
-      App.Handlers.Tg
       App.Tg
       App.Vk
       Lib
