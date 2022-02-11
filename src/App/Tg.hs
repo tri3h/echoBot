@@ -2,11 +2,10 @@
 
 module App.Tg where
 
-import qualified App.Handlers.Bot as H
+import qualified App.Handlers.Bot as Bot
+import qualified App.Handlers.Logger as Logger
 import qualified Data.Configurator as Config
 import Network.HTTP.Simple
-import qualified Data.Text as Text
-import qualified Data.List as List
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import Data.Aeson.Types
@@ -45,10 +44,14 @@ makeRequest path params json = do
            $ setRequestPort 443
            $ setRequestSecure True defaultRequest
 
-getMessage :: Request -> IO (Maybe Message)
-getMessage req = do
+getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
+getMessage logger req = do
     response <- httpJSON req :: IO (Response Value)
-    return (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
+    Logger.debug logger ("Made request:\n" ++ show req)
+    Logger.debug logger ("Got response:\n" ++ show response)
+    let mes = (parseMaybe parseJSON $ getResponseBody response :: Maybe Message)
+    Logger.debug logger ("Parsed response and got message:\n" ++ show mes)
+    return mes
 
 makeUpdateReq :: BS.ByteString -> Maybe Message -> IO Request
 makeUpdateReq token mes = do
@@ -89,18 +92,21 @@ makeRepeatQuestionReq token repeatText num mes = do
                     path = "/bot" `BS.append` token `BS.append` "/sendMessage"
                 makeRequest path params buttons
 
-getRepeatNum :: IORef (Map.Map H.UserID Integer) -> Integer -> H.UserID -> IO Integer
-getRepeatNum ref defNum user = do
+getRepeatNum :: Logger.Handle IO -> IORef (Map.Map Bot.UserID Integer) -> Integer -> Bot.UserID -> IO Integer
+getRepeatNum logger ref defNum user = do
     m <- readIORef ref
     case Map.lookup user m of
-        Just x -> return x
-        Nothing -> return defNum
+        Just x -> do
+            Logger.debug logger ("Got repeat num = " ++ show x ++ " for user " ++ show user)
+            return x
+        Nothing -> do 
+            Logger.debug logger ("Not found repeat num for user " ++ show user ++ ". Set default num")
+            return defNum
     
-setRepeatNum :: IORef (Map.Map H.UserID Integer) -> H.UserID -> Integer -> IO ()
-setRepeatNum ref user num = do 
+setRepeatNum :: Logger.Handle IO -> IORef (Map.Map Bot.UserID Integer) -> Bot.UserID -> Integer -> IO ()
+setRepeatNum logger ref user num = do 
     modifyIORef' ref (Map.insert user num)
-    m <- readIORef ref 
-    print m
+    Logger.debug logger ("Set repeat num = " ++ show num ++ " for user " ++ show user)
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
@@ -113,20 +119,24 @@ main = do
     repeatText <- Config.require config "repeat_text"
     defaultNum <- Config.require config "repeat_times.default" 
     repeatNums <- newIORef Map.empty
-    let handle = H.Handle {
-        H.getMessage = getMessage,
-        H.makeUpdateReq = makeUpdateReq token,
-        H.makeHelpReq = makeHelpReq token helpText,
-        H.makeRepeatReq = makeRepeatReq token,
-        H.makeRepeatQuestionReq = \mes -> do
-            num <- getRepeatNum repeatNums defaultNum $ chatID mes
+    let loggerHandle = Logger.Handle {
+        Logger.verbosity = Logger.Debug,
+        Logger.writeLog = putStrLn
+    }
+    let botHandle = Bot.Handle {
+        Bot.getMessage = getMessage loggerHandle,
+        Bot.makeUpdateReq = makeUpdateReq token,
+        Bot.makeHelpReq = makeHelpReq token helpText,
+        Bot.makeRepeatReq = makeRepeatReq token,
+        Bot.makeRepeatQuestionReq = \mes -> do
+            num <- getRepeatNum loggerHandle repeatNums defaultNum $ chatID mes
             makeRepeatQuestionReq token repeatText num mes,
-        H.getText = \mes -> case text mes of
+        Bot.getText = \mes -> case text mes of
                             Just m -> m
                             Nothing -> "",
-        H.getUserID = chatID,
-        H.getRepeatNum = getRepeatNum repeatNums defaultNum,
-        H.setRepeatNum = setRepeatNum repeatNums
+        Bot.getUserID = chatID,
+        Bot.getRepeatNum = getRepeatNum loggerHandle repeatNums defaultNum,
+        Bot.setRepeatNum = setRepeatNum loggerHandle repeatNums
     }
-    H.getUpdate handle Nothing
+    Bot.getUpdate botHandle Nothing
     return ()

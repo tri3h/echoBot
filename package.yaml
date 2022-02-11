@@ -25,12 +25,10 @@ dependencies:
 - bytestring
 - aeson
 - configurator
-- directory
 - text
 - random
 - hspec
 - containers
-- mtl
 
 library:
   source-dirs: src
