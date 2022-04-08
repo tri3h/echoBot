@@ -1,19 +1,17 @@
-module App.Handlers.Logger(Handle(..), Verbosity(..), debug, warning, error) where
+module App.Handlers.Logger (Handle (..), Verbosity (..), debug, warning, error) where
 
-import Prelude hiding (log, error)
+import Control.Monad (when)
+import Prelude hiding (error, log)
 
-data Handle m = Handle {
-    writeLog :: String -> m (),
+data Handle m = Handle
+  { writeLog :: String -> m (),
     verbosity :: Verbosity
-}
+  }
 
 data Verbosity = Debug | Warning | Error deriving (Eq, Ord, Show)
 
 log :: Monad m => Handle m -> Verbosity -> String -> m ()
-log handle v str = if v >= (verbosity handle)
-                        then writeLog handle $ toString v str
-                        else return ()
-
+log handle v str = when (v >= verbosity handle) $ writeLog handle $ toString v str
 
 debug :: Monad m => Handle m -> String -> m ()
 debug handle = log handle Debug
