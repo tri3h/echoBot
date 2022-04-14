@@ -1,8 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
 
+import App.Handlers.Bot (RepeatNumState (RepeatNumState), initialRepeatNumState)
 import qualified App.Handlers.Bot as H
+import Control.Monad.State (evalStateT)
 import Data.Functor.Identity (Identity)
-import Test.Hspec
+import Test.Hspec (describe, hspec, it, shouldBe)
 
 handle :: H.Handle Identity String String
 handle =
@@ -13,12 +15,14 @@ handle =
         Nothing -> return "",
       H.makeHelpReq = return,
       H.makeRepeatReq = return,
-      H.makeRepeatQuestionReq = return,
+      H.makeRepeatQuestionReq = \mes n -> return (mes ++ show n),
       H.getText = id,
       H.getUserID = const 0,
-      H.getRepeatNum = \_ -> return 1,
-      H.setRepeatNum = \_ _ -> return ()
+      H.defaultRepeatNum = 1,
+      H.markAsReadMes = \_ -> return ()
     }
+
+makeResult state = evalStateT state initialRepeatNumState
 
 main :: IO ()
 main = hspec $ do
@@ -28,17 +32,17 @@ main = hspec $ do
             handle
               { H.makeHelpReq = \mes -> return $ "This is help text for " ++ mes
               }
-          result = H.chooseAnswer handleCase "/help"
+          result = makeResult $ H.chooseAnswer handleCase "/help"
       result `shouldBe` return (Just "This is help text for /help")
     it "Should send repeat number question" $ do
       let handleCase =
             handle
-              { H.makeRepeatQuestionReq = \mes -> return $ "This is repeat number question for " ++ mes
+              { H.getMessage = \_ -> return $ Just "2"
               }
-          result = H.chooseAnswer handleCase "/repeat"
-      result `shouldBe` return (Just "This is repeat number question for /repeat")
+      let result = makeResult $ H.chooseAnswer handleCase "/repeat"
+      result `shouldBe` return (Just "2")
     it "Should send same message" $ do
-      let result = H.chooseAnswer handle "This is message"
+      let result = makeResult $ H.chooseAnswer handle "This is message"
       result `shouldBe` return (Just "This is message")
   describe "Testing send help" $
     it "Should send help text" $ do
@@ -46,17 +50,16 @@ main = hspec $ do
             handle
               { H.makeHelpReq = \mes -> return $ "This is help text for " ++ mes
               }
-          result = H.sendHelp handleCase "message"
+          result = makeResult $ H.sendHelp handleCase "message"
       result `shouldBe` return (Just "This is help text for message")
-  describe "Testing change repeat number" $
-    it "Should change repeat number" $ do
-      let handleCase =
-            handle
-              { H.getMessage = \_ -> return $ Just "5"
-              }
-          result = H.changeRepeatNum handleCase "Message"
-      result `shouldBe` return (Just "5")
+  describe "Testing change repeat number" $ do
+    it "Should get default repeat number" $ do
+      let result = makeResult $ H.getRepeatNum handle 2
+      result `shouldBe` 1
+    it "Should set repeat number for the user" $ do
+      let result = makeResult $ H.setRepeatNum 1 5 >> H.getRepeatNum handle 1
+      result `shouldBe` 5
   describe "Testing repeat message" $
     it "Should send same message" $ do
-      let result = H.repeatMessage handle "This is message"
+      let result = makeResult $ H.repeatMessage handle "This is message"
       result `shouldBe` return (Just "This is message")

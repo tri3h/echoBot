@@ -7,6 +7,7 @@ import qualified App.Handlers.Logger as Logger
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
+import Control.Monad.State (StateT (runStateT))
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
@@ -17,8 +18,6 @@ import Data.Aeson.Types
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Configurator as Config
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
   ( Query,
@@ -45,7 +44,6 @@ main = do
   defaultNum <- Config.require config "repeat_times.default"
   maybeLogVerbosity <- Config.require config "log_verbosity"
   logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
-  repeatNums <- newIORef Map.empty
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
@@ -57,15 +55,13 @@ main = do
             Bot.makeUpdateReq = makeUpdateReq token,
             Bot.makeHelpReq = makeHelpReq token helpText,
             Bot.makeRepeatReq = makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = \mes -> do
-              num <- getRepeatNum loggerHandle repeatNums defaultNum $ chatID mes
-              makeRepeatQuestionReq token repeatText num mes,
+            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
             Bot.getText = fromMaybe "" . text,
             Bot.getUserID = chatID,
-            Bot.getRepeatNum = getRepeatNum loggerHandle repeatNums defaultNum,
-            Bot.setRepeatNum = setRepeatNum loggerHandle repeatNums
+            Bot.defaultRepeatNum = defaultNum,
+            Bot.markAsReadMes = markAsReadMes loggerHandle token
           }
-  _ <- Bot.getUpdate botHandle Nothing
+  _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
   return ()
 
 makeRequest :: BS.ByteString -> Query -> Value -> IO Request
@@ -81,10 +77,9 @@ makeRequest path params json =
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
   response <- httpJSON req :: IO (Response Value)
-  Logger.debug logger ("Made request:\n" ++ show req)
   Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
-  Logger.debug logger ("Parsed response and got message:\n" ++ show mes)
+  Logger.info logger ("Parsed response and got message:\n" ++ show mes)
   return mes
 
 makeUpdateReq :: BS.ByteString -> Maybe Message -> IO Request
@@ -121,8 +116,8 @@ makeRepeatReq token mes = do
       path = "/bot" `BS.append` token `BS.append` "/copyMessage"
   makeRequest path params Null
 
-makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Integer -> Message -> IO Request
-makeRepeatQuestionReq token repeatText num mes = do
+makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> IO Request
+makeRepeatQuestionReq token repeatText mes num = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
           ("text", Just $ repeatText `BS.append` toByteString num)
@@ -139,21 +134,11 @@ makeRepeatQuestionReq token repeatText num mes = do
       path = "/bot" `BS.append` token `BS.append` "/sendMessage"
   makeRequest path params buttons
 
-getRepeatNum :: Logger.Handle IO -> IORef (Map.Map Bot.UserID Integer) -> Integer -> Bot.UserID -> IO Integer
-getRepeatNum logger ref defNum user = do
-  m <- readIORef ref
-  case Map.lookup user m of
-    Just x -> do
-      Logger.debug logger ("Got repeat num = " ++ show x ++ " for user " ++ show user)
-      return x
-    Nothing -> do
-      Logger.debug logger ("Not found repeat num for user " ++ show user ++ ". Set default num")
-      return defNum
-
-setRepeatNum :: Logger.Handle IO -> IORef (Map.Map Bot.UserID Integer) -> Bot.UserID -> Integer -> IO ()
-setRepeatNum logger ref user num = do
-  modifyIORef' ref (Map.insert user num)
-  Logger.debug logger ("Set repeat num = " ++ show num ++ " for user " ++ show user)
+markAsReadMes :: Logger.Handle IO -> BS.ByteString -> Message -> IO ()
+markAsReadMes logger token mes = do
+  req <- makeUpdateReq token (Just mes)
+  _ <- getMessage logger req
+  return ()
 
 toByteString :: Show a => a -> BS.ByteString
 toByteString x = Char8.pack $ show x
