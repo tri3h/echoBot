@@ -46,16 +46,18 @@ import System.Random (Random (randomRIO))
 
 main :: IO ()
 main = do
-  config <- Config.load [Config.Required "VK.config"]
+  config <- Config.load [Config.Required "Configs/VK.config"]
   token <- Config.require config "token"
   groupID <- Config.require config "group_id"
   helpText <- Config.require config "help_text"
   repeatText <- Config.require config "repeat_text"
   defaultNum <- Config.require config "repeat_times.default"
+  maybeLogVerbosity <- Config.require config "log_verbosity"
+  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
   repeatNums <- newIORef Map.empty
   let loggerHandle =
         Logger.Handle
-          { Logger.verbosity = Logger.Error,
+          { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
   info <- getConnectionInfo loggerHandle token groupID

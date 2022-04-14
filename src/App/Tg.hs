@@ -34,18 +34,21 @@ import Network.HTTP.Simple
     setRequestQueryString,
     setRequestSecure,
   )
+import System.Exit (exitFailure)
 
 main :: IO ()
 main = do
-  config <- Config.load [Config.Required "TG.config"]
+  config <- Config.load [Config.Required "Configs/TG.config"]
   token <- Config.require config "token"
   helpText <- Config.require config "help_text"
   repeatText <- Config.require config "repeat_text"
   defaultNum <- Config.require config "repeat_times.default"
+  maybeLogVerbosity <- Config.require config "log_verbosity"
+  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
   repeatNums <- newIORef Map.empty
   let loggerHandle =
         Logger.Handle
-          { Logger.verbosity = Logger.Error,
+          { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
   let botHandle =
