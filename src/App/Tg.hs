@@ -16,6 +16,7 @@ import App.Types.Bot
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
+import App.Utility (toByteString)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
@@ -25,7 +26,6 @@ import Data.Aeson.Types
     parseMaybe,
   )
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Configurator as Config
 import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
@@ -148,6 +148,3 @@ markAsReadMes logger token mes = do
   req <- makeUpdateReq token (Just mes)
   _ <- getMessage logger req
   return ()
-
-toByteString :: Show a => a -> BS.ByteString
-toByteString x = Char8.pack $ show x

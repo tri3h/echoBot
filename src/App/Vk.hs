@@ -22,6 +22,7 @@ import App.Types.Vk
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
+import App.Utility (toByteString)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson (encode)
 import Data.Aeson.Types
@@ -292,6 +293,3 @@ markAsReadMes logger (Token token) mes = do
   _ <- getMessage logger req
   Logger.info logger ("Marked as read message #" ++ tsMes mes)
   return ()
-
-toByteString :: Show a => a -> BS.ByteString
-toByteString x = Char8.pack $ show x
