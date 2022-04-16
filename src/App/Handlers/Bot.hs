@@ -1,8 +1,9 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module App.Handlers.Bot where
 
-import Control.Monad.State (StateT, get, lift, put)
+import Control.Monad.State (MonadState, get, put)
 import Data.Map (Map, empty, insert, lookup)
 import Data.Maybe (isNothing)
 import Prelude hiding (lookup, repeat)
@@ -31,10 +32,10 @@ initialRepeatNumState =
     { repeatNums = empty
     }
 
-getUpdate :: Monad m => Handle m req mes -> Maybe mes -> StateT RepeatNumState m mes
+getUpdate :: MonadState RepeatNumState m => Handle m req mes -> Maybe mes -> m mes
 getUpdate handle mes = do
-  req <- lift $ makeUpdateReq handle mes
-  newMes <- lift $ getMessage handle req
+  req <- makeUpdateReq handle mes
+  newMes <- getMessage handle req
   case newMes of
     Just m -> do
       answerMes <- chooseAnswer handle m
@@ -42,7 +43,7 @@ getUpdate handle mes = do
       getUpdate handle endMes
     Nothing -> getUpdate handle newMes
 
-chooseAnswer :: Monad m => Handle m req mes -> mes -> StateT RepeatNumState m (Maybe mes)
+chooseAnswer :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 chooseAnswer handle mes = do
   let text = getText handle mes
   case text of
@@ -50,32 +51,32 @@ chooseAnswer handle mes = do
     "/repeat" -> changeRepeatNum handle mes
     _ -> repeatMessage handle mes
 
-sendHelp :: Monad m => Handle m req mes -> mes -> StateT RepeatNumState m (Maybe mes)
+sendHelp :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 sendHelp handle mes = do
-  req <- lift $ makeHelpReq handle mes
-  lift $ getMessage handle req
+  req <- makeHelpReq handle mes
+  getMessage handle req
 
-changeRepeatNum :: Monad m => Handle m req mes -> mes -> StateT RepeatNumState m (Maybe mes)
+changeRepeatNum :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 changeRepeatNum handle iniMes = do
   let userId = getUserID handle iniMes
   num <- getRepeatNum handle userId
-  req <- lift $ makeRepeatQuestionReq handle iniMes num
-  _ <- lift $ getMessage handle req
+  req <- makeRepeatQuestionReq handle iniMes num
+  _ <- getMessage handle req
   getNum (Just iniMes)
   where
     getNum mes = do
-      req <- lift $ makeUpdateReq handle mes
-      newMes <- lift $ getMessage handle req
+      req <- makeUpdateReq handle mes
+      newMes <- getMessage handle req
       case newMes of
         Just m -> do
           let num = getText handle m
           let userID = getUserID handle m
           setRepeatNum userID (read num :: Integer)
-          lift $ markAsReadMes handle m
+          markAsReadMes handle m
           return newMes
         Nothing -> getNum newMes
 
-repeatMessage :: Monad m => Handle m req mes -> mes -> StateT RepeatNumState m (Maybe mes)
+repeatMessage :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 repeatMessage handle mes = do
   let userID = getUserID handle mes
   num <- getRepeatNum handle userID
@@ -86,15 +87,15 @@ repeatMessage handle mes = do
       _ <- send
       repeat (n -1)
     send = do
-      req <- lift $ makeRepeatReq handle mes
-      lift $ getMessage handle req
+      req <- makeRepeatReq handle mes
+      getMessage handle req
 
-setRepeatNum :: Monad m => UserID -> Integer -> StateT RepeatNumState m ()
+setRepeatNum :: MonadState RepeatNumState m => UserID -> Integer -> m ()
 setRepeatNum userId num = do
   state <- get
   put $ state {repeatNums = insert userId num $ repeatNums state}
 
-getRepeatNum :: Monad m => Handle m req mes -> UserID -> StateT RepeatNumState m Integer
+getRepeatNum :: MonadState RepeatNumState m => Handle m req mes -> UserID -> m Integer
 getRepeatNum handle userId = do
   state <- get
   let maybeNum = lookup userId $ repeatNums state

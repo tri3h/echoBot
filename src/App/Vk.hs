@@ -11,7 +11,7 @@ import App.Types.Vk
     GeoInfo (lat, long),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
-import Control.Monad.State (StateT (runStateT))
+import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson (encode)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
@@ -61,15 +61,15 @@ main = do
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = getMessage loggerHandle,
-            Bot.makeUpdateReq = makeUpdateReq info,
-            Bot.makeHelpReq = makeHelpReq token helpText,
-            Bot.makeRepeatReq = makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
+          { Bot.getMessage = lift . getMessage loggerHandle,
+            Bot.makeUpdateReq = lift . makeUpdateReq info,
+            Bot.makeHelpReq = lift . makeHelpReq token helpText,
+            Bot.makeRepeatReq = lift . makeRepeatReq token,
+            Bot.makeRepeatQuestionReq = \a b -> lift $ makeRepeatQuestionReq token repeatText a b,
             Bot.getText = fromMaybe "" . text,
             Bot.getUserID = peerID,
             Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = markAsReadMes loggerHandle token
+            Bot.markAsReadMes = lift . markAsReadMes loggerHandle token
           }
   _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
   return ()
@@ -81,6 +81,7 @@ getConnectionInfo :: Logger.Handle IO -> BS.ByteString -> BS.ByteString -> IO Co
 getConnectionInfo logger token groupID = do
   req <- makeConnectionInfoReq token groupID
   resp <- httpJSON req :: IO (Response Value)
+  Logger.debug logger ("Made request for connection info and got response:\n" ++ show resp)
   let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
   case info of
     Just x -> do

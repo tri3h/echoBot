@@ -2,11 +2,11 @@
 
 import App.Handlers.Bot (RepeatNumState (RepeatNumState), initialRepeatNumState)
 import qualified App.Handlers.Bot as H
-import Control.Monad.State (evalStateT)
+import Control.Monad.State (StateT, evalStateT)
 import Data.Functor.Identity (Identity)
 import Test.Hspec (describe, hspec, it, shouldBe)
 
-handle :: H.Handle Identity String String
+handle :: H.Handle (StateT RepeatNumState Identity) String String
 handle =
   H.Handle
     { H.getMessage = return . Just,

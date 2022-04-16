@@ -7,7 +7,7 @@ import qualified App.Handlers.Logger as Logger
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
-import Control.Monad.State (StateT (runStateT))
+import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
@@ -51,15 +51,15 @@ main = do
           }
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = getMessage loggerHandle,
-            Bot.makeUpdateReq = makeUpdateReq token,
-            Bot.makeHelpReq = makeHelpReq token helpText,
-            Bot.makeRepeatReq = makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
+          { Bot.getMessage = lift . getMessage loggerHandle,
+            Bot.makeUpdateReq = lift . makeUpdateReq token,
+            Bot.makeHelpReq = lift . makeHelpReq token helpText,
+            Bot.makeRepeatReq = lift . makeRepeatReq token,
+            Bot.makeRepeatQuestionReq = \a b -> lift $ makeRepeatQuestionReq token repeatText a b,
             Bot.getText = fromMaybe "" . text,
             Bot.getUserID = chatID,
             Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = markAsReadMes loggerHandle token
+            Bot.markAsReadMes = lift . markAsReadMes loggerHandle token
           }
   _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
   return ()
