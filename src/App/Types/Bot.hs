@@ -4,7 +4,7 @@ import qualified Data.ByteString as BS
 
 newtype UserID = UserID Integer deriving (Eq, Ord)
 
-newtype RepeatNum = RepeatNum Integer deriving (Eq, Ord)
+newtype RepeatNum = RepeatNum Integer deriving (Eq, Ord, Show)
 
 newtype MessageText = MessageText String
 
