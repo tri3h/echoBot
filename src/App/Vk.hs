@@ -22,13 +22,12 @@ import App.Types.Vk
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
-import App.Utility (toByteString)
+import App.Utility (toByteString, tryGetResponse)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson (encode)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
-    Value,
     object,
     parseMaybe,
   )
@@ -42,10 +41,8 @@ import qualified Data.Text.Encoding as Encoding
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
-    httpJSON,
     setRequestHost,
     setRequestPath,
     setRequestPort,
@@ -92,7 +89,7 @@ versionAPI = 5.131
 getConnectionInfo :: Logger.Handle IO -> Token -> GroupID -> IO ConnectionInfo
 getConnectionInfo logger token groupID = do
   req <- makeConnectionInfoReq token groupID
-  resp <- httpJSON req :: IO (Response Value)
+  resp <- tryGetResponse logger req
   Logger.debug logger ("Made request for connection info and got response:\n" ++ show resp)
   let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
   case info of
@@ -116,7 +113,7 @@ makeConnectionInfoReq (Token token) (GroupID groupID) = do
 
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
+  response <- tryGetResponse logger req
   Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
   Logger.info logger ("Parsed response and got message:\n" ++ show mes)

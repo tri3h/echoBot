@@ -16,7 +16,7 @@ import App.Types.Bot
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
-import App.Utility (toByteString)
+import App.Utility (toByteString, tryGetResponse)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
@@ -31,11 +31,9 @@ import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
     getResponseStatusCode,
-    httpJSON,
     setRequestBodyJSON,
     setRequestHost,
     setRequestPath,
@@ -86,7 +84,7 @@ makeRequest (Path path) params json =
 
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
+  response <- tryGetResponse logger req
   let statusCode = getResponseStatusCode response
   if statusCode == 404
     then do
