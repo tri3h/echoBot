@@ -34,6 +34,7 @@ import Network.HTTP.Simple
     Response,
     defaultRequest,
     getResponseBody,
+    getResponseStatusCode,
     httpJSON,
     setRequestBodyJSON,
     setRequestHost,
@@ -86,10 +87,16 @@ makeRequest (Path path) params json =
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
   response <- httpJSON req :: IO (Response Value)
-  Logger.debug logger ("Got response:\n" ++ show response)
-  let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
-  Logger.info logger ("Parsed response and got message:\n" ++ show mes)
-  return mes
+  let statusCode = getResponseStatusCode response
+  if statusCode == 404
+    then do
+      Logger.error logger "Invalid token"
+      exitFailure
+    else do
+      Logger.debug logger ("Got response:\n" ++ show response)
+      let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
+      Logger.info logger ("Parsed response and got message:\n" ++ show mes)
+      return mes
 
 makeUpdateReq :: Token -> Maybe Message -> IO Request
 makeUpdateReq (Token token) mes = do
