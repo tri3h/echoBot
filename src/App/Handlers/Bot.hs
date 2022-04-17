@@ -4,6 +4,7 @@
 module App.Handlers.Bot where
 
 import App.Types.Bot (MessageText (..), RepeatNum (..), UserID)
+import Control.Monad (when)
 import Control.Monad.State (MonadState, get, put)
 import Data.Foldable (forM_)
 import Data.Map (Map, empty, insert, lookup)
@@ -72,7 +73,9 @@ changeRepeatNum handle iniMes = do
         Just m -> do
           let textNum = getText handle m
           let userID = getUserID handle m
-          forM_ (textToNum textNum) (setRepeatNum userID)
+          let n = textToNum textNum
+          let possibleValues = map (Just . RepeatNum) [1, 2, 3, 4, 5]
+          when (n `elem` possibleValues) $ forM_ n (setRepeatNum userID)
           markAsReadMes handle m
           return newMes
         Nothing -> getNum newMes
