@@ -4,9 +4,12 @@
 module App.Handlers.Bot where
 
 import App.Types.Bot (MessageText (..), RepeatNum (..), UserID)
+import Control.Monad (when)
 import Control.Monad.State (MonadState, get, put)
+import Data.Foldable (forM_)
 import Data.Map (Map, empty, insert, lookup)
 import Data.Maybe (isNothing)
+import Text.Read (readMaybe)
 import Prelude hiding (lookup, repeat)
 
 data Handle m req mes = Handle
@@ -70,13 +73,15 @@ changeRepeatNum handle iniMes = do
         Just m -> do
           let textNum = getText handle m
           let userID = getUserID handle m
-          setRepeatNum userID (textToNum textNum)
+          let n = textToNum textNum
+          let possibleValues = map (Just . RepeatNum) [1, 2, 3, 4, 5]
+          when (n `elem` possibleValues) $ forM_ n (setRepeatNum userID)
           markAsReadMes handle m
           return newMes
         Nothing -> getNum newMes
 
-textToNum :: MessageText -> RepeatNum
-textToNum (MessageText text) = RepeatNum (read text :: Integer)
+textToNum :: MessageText -> Maybe RepeatNum
+textToNum (MessageText text) = RepeatNum <$> (readMaybe text :: Maybe Integer)
 
 repeatMessage :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 repeatMessage handle mes = do
