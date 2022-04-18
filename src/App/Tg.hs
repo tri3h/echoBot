@@ -12,11 +12,15 @@ import App.Types.Bot
     RepeatText (..),
     Token (..),
     UserID (UserID),
+    defaultHelpText,
+    defaultLogVerbosity,
+    defaultRepeatNum,
+    defaultRepeatText,
   )
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
-import App.Utility (toByteString)
+import App.Utility (toByteString, tryGetResponse)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
@@ -31,10 +35,9 @@ import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
-    httpJSON,
+    getResponseStatusCode,
     setRequestBodyJSON,
     setRequestHost,
     setRequestPath,
@@ -47,17 +50,24 @@ import System.Exit (exitFailure)
 main :: IO ()
 main = do
   config <- Config.load [Config.Required "Configs/TG.config"]
-  token <- Token <$> Config.require config "token"
-  helpText <- HelpText <$> Config.require config "help_text"
-  repeatText <- RepeatText <$> Config.require config "repeat_text"
-  defaultNum <- RepeatNum <$> Config.require config "repeat_times.default"
-  maybeLogVerbosity <- Config.require config "log_verbosity"
-  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
+  maybeLogVerbosity <- Config.lookup config "log_verbosity"
+  let logVerbosity = case maybeLogVerbosity of
+        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
+        Nothing -> defaultLogVerbosity
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
+  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
+  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
+  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
+  maybeToken <- Config.lookup config "token"
+  token <- case maybeToken of
+    Just x -> return $ Token x
+    Nothing -> do
+      Logger.error loggerHandle "Token has invalid format"
+      exitFailure
   let botHandle =
         Bot.Handle
           { Bot.getMessage = lift . getMessage loggerHandle,
@@ -85,11 +95,17 @@ makeRequest (Path path) params json =
 
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
-  Logger.debug logger ("Got response:\n" ++ show response)
-  let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
-  Logger.info logger ("Parsed response and got message:\n" ++ show mes)
-  return mes
+  response <- tryGetResponse logger req
+  let statusCode = getResponseStatusCode response
+  if statusCode == 404
+    then do
+      Logger.error logger "Invalid token"
+      exitFailure
+    else do
+      Logger.debug logger ("Got response:\n" ++ show response)
+      let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
+      Logger.info logger ("Parsed response and got message:\n" ++ show mes)
+      return mes
 
 makeUpdateReq :: Token -> Maybe Message -> IO Request
 makeUpdateReq (Token token) mes = do
