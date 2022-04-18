@@ -12,6 +12,10 @@ import App.Types.Bot
     RepeatText (..),
     Token (..),
     UserID (UserID),
+    defaultHelpText,
+    defaultLogVerbosity,
+    defaultRepeatNum,
+    defaultRepeatText,
   )
 import App.Types.Vk
   ( Attachment (Media, Sticker, accessKey, mediaID, name, ownerID),
@@ -55,18 +59,30 @@ import System.Random (Random (randomRIO))
 main :: IO ()
 main = do
   config <- Config.load [Config.Required "Configs/VK.config"]
-  token <- Token <$> Config.require config "token"
-  groupID <- GroupID <$> Config.require config "group_id"
-  helpText <- HelpText <$> Config.require config "help_text"
-  repeatText <- RepeatText <$> Config.require config "repeat_text"
-  defaultNum <- RepeatNum <$> Config.require config "repeat_times.default"
-  maybeLogVerbosity <- Config.require config "log_verbosity"
-  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
+  maybeLogVerbosity <- Config.lookup config "log_verbosity"
+  let logVerbosity = case maybeLogVerbosity of
+        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
+        Nothing -> defaultLogVerbosity
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
+  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
+  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
+  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
+  maybeGroupID <- Config.lookup config "group_id"
+  groupID <- case maybeGroupID of
+    Just x -> return $ GroupID x
+    Nothing -> do
+      Logger.error loggerHandle "Group id has invalid format"
+      exitFailure
+  maybeToken <- Config.lookup config "token"
+  token <- case maybeToken of
+    Just x -> return $ Token x
+    Nothing -> do
+      Logger.error loggerHandle "Token has invalid format"
+      exitFailure
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
