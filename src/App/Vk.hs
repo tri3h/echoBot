@@ -11,12 +11,11 @@ import App.Types.Vk
     GeoInfo (lat, long),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
-import Control.Monad.State (StateT (runStateT), lift)
+import Control.Monad.State (MonadIO (liftIO), StateT (runStateT))
 import Data.Aeson (encode)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
-    Value,
     object,
     parseMaybe,
   )
@@ -30,7 +29,6 @@ import qualified Data.Text.Encoding as Encoding
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
     httpJSON,
@@ -61,15 +59,15 @@ main = do
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = lift . getMessage loggerHandle,
-            Bot.makeUpdateReq = lift . makeUpdateReq info,
-            Bot.makeHelpReq = lift . makeHelpReq token helpText,
-            Bot.makeRepeatReq = lift . makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = \a b -> lift $ makeRepeatQuestionReq token repeatText a b,
+          { Bot.getMessage = getMessage loggerHandle,
+            Bot.makeUpdateReq = makeUpdateReq info,
+            Bot.makeHelpReq = makeHelpReq token helpText,
+            Bot.makeRepeatReq = makeRepeatReq token,
+            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
             Bot.getText = fromMaybe "" . text,
             Bot.getUserID = peerID,
             Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = lift . markAsReadMes loggerHandle token
+            Bot.markAsReadMes = markAsReadMes loggerHandle token
           }
   _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
   return ()
@@ -79,8 +77,8 @@ versionAPI = 5.131
 
 getConnectionInfo :: Logger.Handle IO -> BS.ByteString -> BS.ByteString -> IO ConnectionInfo
 getConnectionInfo logger token groupID = do
-  req <- makeConnectionInfoReq token groupID
-  resp <- httpJSON req :: IO (Response Value)
+  let req = makeConnectionInfoReq token groupID
+  resp <- httpJSON req
   Logger.debug logger ("Made request for connection info and got response:\n" ++ show resp)
   let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
   case info of
@@ -91,7 +89,7 @@ getConnectionInfo logger token groupID = do
       Logger.error logger "Connection information is not found"
       exitFailure
 
-makeConnectionInfoReq :: BS.ByteString -> BS.ByteString -> IO Request
+makeConnectionInfoReq :: BS.ByteString -> BS.ByteString -> Request
 makeConnectionInfoReq token groupID = do
   let path = "/method/groups.getLongPollServer"
       host = "api.vk.com"
@@ -102,24 +100,23 @@ makeConnectionInfoReq token groupID = do
         ]
   makeRequest path host param
 
-getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
+getMessage :: Logger.Handle IO -> Request -> StateT Bot.RepeatNumState IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
-  Logger.debug logger ("Got response:\n" ++ show response)
+  response <- httpJSON req
+  liftIO $ Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
-  Logger.info logger ("Parsed response and got message:\n" ++ show mes)
+  liftIO $ Logger.info logger ("Parsed response and got message:\n" ++ show mes)
   return mes
 
-makeRequest :: BS.ByteString -> BS.ByteString -> Query -> IO Request
+makeRequest :: BS.ByteString -> BS.ByteString -> Query -> Request
 makeRequest path host param =
-  return $
-    setRequestQueryString param $
-      setRequestPath path $
-        setRequestHost host $
-          setRequestPort 443 $
-            setRequestSecure True defaultRequest
+  setRequestQueryString param $
+    setRequestPath path $
+      setRequestHost host $
+        setRequestPort 443 $
+          setRequestSecure True defaultRequest
 
-makeUpdateReq :: ConnectionInfo -> Maybe Message -> IO Request
+makeUpdateReq :: ConnectionInfo -> Maybe Message -> StateT Bot.RepeatNumState IO Request
 makeUpdateReq info mes = do
   let ts' = case mes of
         Just m -> tsMes m
@@ -132,11 +129,11 @@ makeUpdateReq info mes = do
           ("ts", Just $ Char8.pack ts'),
           ("wait", Just "25")
         ]
-  makeRequest path host param
+  return $ makeRequest path host param
 
-makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> IO Request
+makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
 makeHelpReq token helpText mes = do
-  random <- randomRIO (0, 100000000) :: IO Integer
+  random <- liftIO (randomRIO (0, 100000000) :: IO Integer)
   let param =
         [ ("message", Just helpText),
           ("peer_id", Just $ toByteString $ peerID mes),
@@ -146,11 +143,11 @@ makeHelpReq token helpText mes = do
         ]
       path = "/method/messages.send"
       host = "api.vk.com"
-  makeRequest path host param
+  return $ makeRequest path host param
 
-makeRepeatReq :: BS.ByteString -> Message -> IO Request
+makeRepeatReq :: BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
 makeRepeatReq token mes = do
-  random <- randomRIO (0, 100000000) :: IO Integer
+  random <- liftIO (randomRIO (0, 100000000) :: IO Integer)
   let botMessage = case text mes of
         Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
         Nothing -> Nothing
@@ -177,7 +174,7 @@ makeRepeatReq token mes = do
         ]
       path = "/method/messages.send"
       host = "api.vk.com"
-  makeRequest path host param
+  return $ makeRequest path host param
 
 mediaToBS :: Message -> Maybe BS.ByteString
 mediaToBS mes = case attachments mes of
@@ -209,9 +206,9 @@ stickerToBS mes = case attachments mes of
     getSticker (Sticker s : _) = toByteString s
     getSticker (_ : xs) = getSticker xs
 
-makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> IO Request
+makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> StateT Bot.RepeatNumState IO Request
 makeRepeatQuestionReq token repeatText mes repeatNum = do
-  random <- randomRIO (0, 100000000) :: IO Integer
+  random <- liftIO (randomRIO (0, 100000000) :: IO Integer)
   let param =
         [ ("keyboard", Just $ BSL.toStrict $ encode buttons),
           ("message", Just $ repeatText `BS.append` toByteString repeatNum),
@@ -264,9 +261,9 @@ makeRepeatQuestionReq token repeatText mes repeatNum = do
           ]
       path = "/method/messages.send"
       host = "api.vk.com"
-  makeRequest path host param
+  return $ makeRequest path host param
 
-markAsReadMes :: Logger.Handle IO -> BS.ByteString -> Message -> IO ()
+markAsReadMes :: Logger.Handle IO -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO ()
 markAsReadMes logger token mes = do
   let param =
         [ ("message_ids", Just $ toByteString [tsMes mes]),
@@ -277,9 +274,9 @@ markAsReadMes logger token mes = do
         ]
       path = "/method/messages.markAsRead"
       host = "api.vk.com"
-  req <- makeRequest path host param
+  let req = makeRequest path host param
   _ <- getMessage logger req
-  Logger.info logger ("Marked as read message #" ++ tsMes mes)
+  let _ = Logger.info logger ("Marked as read message #" ++ tsMes mes)
   return ()
 
 toByteString :: Show a => a -> BS.ByteString

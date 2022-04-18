@@ -1,4 +1,6 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module App.Tg where
 
@@ -7,7 +9,7 @@ import qualified App.Handlers.Logger as Logger
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
-import Control.Monad.State (StateT (runStateT), lift)
+import Control.Monad.State (MonadIO (liftIO), StateT (runStateT))
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
@@ -22,7 +24,6 @@ import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
     httpJSON,
@@ -47,42 +48,41 @@ main = do
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
-            Logger.writeLog = putStrLn
+            Logger.writeLog = liftIO . putStrLn
           }
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = lift . getMessage loggerHandle,
-            Bot.makeUpdateReq = lift . makeUpdateReq token,
-            Bot.makeHelpReq = lift . makeHelpReq token helpText,
-            Bot.makeRepeatReq = lift . makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = \a b -> lift $ makeRepeatQuestionReq token repeatText a b,
+          { Bot.getMessage = getMessage loggerHandle,
+            Bot.makeUpdateReq = makeUpdateReq token,
+            Bot.makeHelpReq = makeHelpReq token helpText,
+            Bot.makeRepeatReq = makeRepeatReq token,
+            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
             Bot.getText = fromMaybe "" . text,
             Bot.getUserID = chatID,
             Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = lift . markAsReadMes loggerHandle token
+            Bot.markAsReadMes = markAsReadMes loggerHandle token
           }
   _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
   return ()
 
-makeRequest :: BS.ByteString -> Query -> Value -> IO Request
+makeRequest :: BS.ByteString -> Query -> Value -> Request
 makeRequest path params json =
-  return $
-    setRequestBodyJSON json $
-      setRequestQueryString params $
-        setRequestPath path $
-          setRequestHost "api.telegram.org" $
-            setRequestPort 443 $
-              setRequestSecure True defaultRequest
+  setRequestBodyJSON json $
+    setRequestQueryString params $
+      setRequestPath path $
+        setRequestHost "api.telegram.org" $
+          setRequestPort 443 $
+            setRequestSecure True defaultRequest
 
-getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
+getMessage :: Logger.Handle (StateT Bot.RepeatNumState IO) -> Request -> StateT Bot.RepeatNumState IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
+  response <- httpJSON req
   Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
   Logger.info logger ("Parsed response and got message:\n" ++ show mes)
   return mes
 
-makeUpdateReq :: BS.ByteString -> Maybe Message -> IO Request
+makeUpdateReq :: BS.ByteString -> Maybe Message -> StateT Bot.RepeatNumState IO Request
 makeUpdateReq token mes = do
   let params =
         [ ("limit", Just "1"),
@@ -90,22 +90,22 @@ makeUpdateReq token mes = do
           ("offset", getOffset mes)
         ]
       path = "/bot" `BS.append` token `BS.append` "/getUpdates"
-  makeRequest path params Null
+  return $ makeRequest path params Null
   where
     getOffset :: Maybe Message -> Maybe BS.ByteString
     getOffset Nothing = Nothing
     getOffset (Just m) = Just . toByteString $ updateID m + 1
 
-makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> IO Request
+makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
 makeHelpReq token helpText mes = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
           ("text", Just helpText)
         ]
       path = "/bot" `BS.append` token `BS.append` "/sendMessage"
-  makeRequest path params Null
+  return $ makeRequest path params Null
 
-makeRepeatReq :: BS.ByteString -> Message -> IO Request
+makeRepeatReq :: BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
 makeRepeatReq token mes = do
   let param =
         [ ("chat_id", chatID mes),
@@ -114,9 +114,9 @@ makeRepeatReq token mes = do
         ]
       params = fmap (\(a, b) -> (a, Just $ toByteString b)) param
       path = "/bot" `BS.append` token `BS.append` "/copyMessage"
-  makeRequest path params Null
+  return $ makeRequest path params Null
 
-makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> IO Request
+makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> StateT Bot.RepeatNumState IO Request
 makeRepeatQuestionReq token repeatText mes num = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
@@ -132,9 +132,9 @@ makeRepeatQuestionReq token repeatText mes num = do
                 ]
           ]
       path = "/bot" `BS.append` token `BS.append` "/sendMessage"
-  makeRequest path params buttons
+  return $ makeRequest path params buttons
 
-markAsReadMes :: Logger.Handle IO -> BS.ByteString -> Message -> IO ()
+markAsReadMes :: Logger.Handle (StateT Bot.RepeatNumState IO) -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO ()
 markAsReadMes logger token mes = do
   req <- makeUpdateReq token (Just mes)
   _ <- getMessage logger req
