@@ -12,6 +12,10 @@ import App.Types.Bot
     RepeatText (..),
     Token (..),
     UserID (UserID),
+    defaultHelpText,
+    defaultLogVerbosity,
+    defaultRepeatNum,
+    defaultRepeatText,
   )
 import App.Types.Vk
   ( Attachment (Media, Sticker, accessKey, mediaID, name, ownerID),
@@ -22,12 +26,12 @@ import App.Types.Vk
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
+import App.Utility (toByteString, tryGetResponse)
 import Control.Monad.State (StateT (runStateT), lift)
 import Data.Aeson (encode)
 import Data.Aeson.Types
   ( FromJSON (parseJSON),
     KeyValue ((.=)),
-    Value,
     object,
     parseMaybe,
   )
@@ -41,10 +45,8 @@ import qualified Data.Text.Encoding as Encoding
 import Network.HTTP.Simple
   ( Query,
     Request,
-    Response,
     defaultRequest,
     getResponseBody,
-    httpJSON,
     setRequestHost,
     setRequestPath,
     setRequestPort,
@@ -57,18 +59,30 @@ import System.Random (Random (randomRIO))
 main :: IO ()
 main = do
   config <- Config.load [Config.Required "Configs/VK.config"]
-  token <- Token <$> Config.require config "token"
-  groupID <- GroupID <$> Config.require config "group_id"
-  helpText <- HelpText <$> Config.require config "help_text"
-  repeatText <- RepeatText <$> Config.require config "repeat_text"
-  defaultNum <- RepeatNum <$> Config.require config "repeat_times.default"
-  maybeLogVerbosity <- Config.require config "log_verbosity"
-  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
+  maybeLogVerbosity <- Config.lookup config "log_verbosity"
+  let logVerbosity = case maybeLogVerbosity of
+        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
+        Nothing -> defaultLogVerbosity
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
+  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
+  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
+  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
+  maybeGroupID <- Config.lookup config "group_id"
+  groupID <- case maybeGroupID of
+    Just x -> return $ GroupID x
+    Nothing -> do
+      Logger.error loggerHandle "Group id has invalid format"
+      exitFailure
+  maybeToken <- Config.lookup config "token"
+  token <- case maybeToken of
+    Just x -> return $ Token x
+    Nothing -> do
+      Logger.error loggerHandle "Token has invalid format"
+      exitFailure
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
@@ -91,7 +105,7 @@ versionAPI = 5.131
 getConnectionInfo :: Logger.Handle IO -> Token -> GroupID -> IO ConnectionInfo
 getConnectionInfo logger token groupID = do
   req <- makeConnectionInfoReq token groupID
-  resp <- httpJSON req :: IO (Response Value)
+  resp <- tryGetResponse logger req
   Logger.debug logger ("Made request for connection info and got response:\n" ++ show resp)
   let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
   case info of
@@ -115,7 +129,7 @@ makeConnectionInfoReq (Token token) (GroupID groupID) = do
 
 getMessage :: Logger.Handle IO -> Request -> IO (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req :: IO (Response Value)
+  response <- tryGetResponse logger req
   Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
   Logger.info logger ("Parsed response and got message:\n" ++ show mes)
@@ -292,6 +306,3 @@ markAsReadMes logger (Token token) mes = do
   _ <- getMessage logger req
   Logger.info logger ("Marked as read message #" ++ tsMes mes)
   return ()
-
-toByteString :: Show a => a -> BS.ByteString
-toByteString x = Char8.pack $ show x
