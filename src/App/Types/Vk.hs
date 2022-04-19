@@ -7,6 +7,8 @@ import Data.Aeson (FromJSON, withObject, (.:), (.:?))
 import Data.Aeson.Types (FromJSON (parseJSON), Parser)
 import qualified Data.Text as Text
 
+newtype UpdateID = UpdateID String deriving (Show)
+
 data Message = Message
   { tsMes :: String,
     peerID :: Integer,
@@ -54,6 +56,11 @@ instance FromJSON Message where
     text <- message .:? "text"
     attachments <- message .:? "attachments"
     return Message {..}
+
+instance FromJSON UpdateID where
+  parseJSON = withObject "Update" $ \o -> do
+    upd <- o .: "ts"
+    return $ UpdateID upd
 
 instance FromJSON ForwardID where
   parseJSON = withObject "ForwardID" $ \o -> do

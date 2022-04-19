@@ -37,10 +37,13 @@ getUpdate handle mes = do
   req <- makeUpdateReq handle mes
   newMes <- getMessage handle req
   case newMes of
-    Just m -> do
-      answerMes <- chooseAnswer handle m
-      let endMes = if isNothing answerMes then newMes else answerMes
-      getUpdate handle endMes
+    Just m ->
+      if null $ getText handle m
+        then getUpdate handle newMes
+        else do
+          answerMes <- chooseAnswer handle m
+          let lastMes = if isNothing answerMes then newMes else answerMes
+          getUpdate handle lastMes
     Nothing -> getUpdate handle newMes
 
 chooseAnswer :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
