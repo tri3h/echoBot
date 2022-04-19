@@ -6,6 +6,7 @@ module App.Tg where
 
 import qualified App.Handlers.Bot as Bot
 import qualified App.Handlers.Logger as Logger
+import App.Types.Bot (BotState)
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
   )
@@ -74,7 +75,7 @@ makeRequest path params json =
           setRequestPort 443 $
             setRequestSecure True defaultRequest
 
-getMessage :: Logger.Handle (StateT Bot.RepeatNumState IO) -> Request -> StateT Bot.RepeatNumState IO (Maybe Message)
+getMessage :: Logger.Handle BotState -> Request -> BotState (Maybe Message)
 getMessage logger req = do
   response <- httpJSON req
   Logger.debug logger ("Got response:\n" ++ show response)
@@ -82,7 +83,7 @@ getMessage logger req = do
   Logger.info logger ("Parsed response and got message:\n" ++ show mes)
   return mes
 
-makeUpdateReq :: BS.ByteString -> Maybe Message -> StateT Bot.RepeatNumState IO Request
+makeUpdateReq :: BS.ByteString -> Maybe Message -> BotState Request
 makeUpdateReq token mes = do
   let params =
         [ ("limit", Just "1"),
@@ -96,7 +97,7 @@ makeUpdateReq token mes = do
     getOffset Nothing = Nothing
     getOffset (Just m) = Just . toByteString $ updateID m + 1
 
-makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
+makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> BotState Request
 makeHelpReq token helpText mes = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
@@ -105,7 +106,7 @@ makeHelpReq token helpText mes = do
       path = "/bot" `BS.append` token `BS.append` "/sendMessage"
   return $ makeRequest path params Null
 
-makeRepeatReq :: BS.ByteString -> Message -> StateT Bot.RepeatNumState IO Request
+makeRepeatReq :: BS.ByteString -> Message -> BotState Request
 makeRepeatReq token mes = do
   let param =
         [ ("chat_id", chatID mes),
@@ -116,7 +117,7 @@ makeRepeatReq token mes = do
       path = "/bot" `BS.append` token `BS.append` "/copyMessage"
   return $ makeRequest path params Null
 
-makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> StateT Bot.RepeatNumState IO Request
+makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> BotState Request
 makeRepeatQuestionReq token repeatText mes num = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
@@ -134,7 +135,7 @@ makeRepeatQuestionReq token repeatText mes num = do
       path = "/bot" `BS.append` token `BS.append` "/sendMessage"
   return $ makeRequest path params buttons
 
-markAsReadMes :: Logger.Handle (StateT Bot.RepeatNumState IO) -> BS.ByteString -> Message -> StateT Bot.RepeatNumState IO ()
+markAsReadMes :: Logger.Handle BotState -> BS.ByteString -> Message -> BotState ()
 markAsReadMes logger token mes = do
   req <- makeUpdateReq token (Just mes)
   _ <- getMessage logger req
