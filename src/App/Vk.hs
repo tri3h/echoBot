@@ -70,7 +70,7 @@ main = do
             Bot.defaultRepeatNum = defaultNum,
             Bot.markAsReadMes = markAsReadMes loggerHandle info token
           }
-  _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
+  _ <- runStateT (Bot.getUpdates botHandle Nothing) Bot.initialRepeatNumState
   return ()
 
 versionAPI :: Double
