@@ -1,6 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 
 module App.Tg where
 
@@ -83,7 +81,7 @@ main = do
             Bot.defaultRepeatNum = defaultNum,
             Bot.markAsReadMes = markAsReadMes loggerHandle token
           }
-  _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
+  _ <- runStateT (Bot.getUpdates botHandle Nothing) Bot.initialRepeatNumState
   return ()
 
 makeRequest :: Path -> Query -> Value -> Request
