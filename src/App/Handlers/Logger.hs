@@ -8,7 +8,7 @@ data Handle m = Handle
     verbosity :: Verbosity
   }
 
-data Verbosity = Info | Debug | Warning | Error deriving (Eq, Ord, Show)
+data Verbosity = Debug | Info | Warning | Error deriving (Eq, Ord, Show)
 
 log :: Monad m => Handle m -> Verbosity -> String -> m ()
 log handle v str = when (v >= verbosity handle) $ writeLog handle $ toString v str
@@ -26,10 +26,10 @@ error :: Monad m => Handle m -> String -> m ()
 error handle = log handle Error
 
 fromString :: String -> Maybe Verbosity
-fromString "Info" = Just Info 
-fromString "Debug" = Just Debug 
-fromString "Warning" = Just Warning 
-fromString "Error" = Just Error 
+fromString "Info" = Just Info
+fromString "Debug" = Just Debug
+fromString "Warning" = Just Warning
+fromString "Error" = Just Error
 fromString _ = Nothing
 
 toString :: Verbosity -> String -> String
