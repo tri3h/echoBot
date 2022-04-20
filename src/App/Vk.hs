@@ -26,6 +26,7 @@ import App.Types.Vk
     GroupID (GroupID),
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
+    UpdateID (UpdateID),
   )
 import App.Utility (toByteString, tryGetResponse, tryGetResponseBotState)
 import Control.Monad.State (MonadIO (liftIO), StateT (runStateT))
@@ -40,7 +41,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as Config
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Encoding
 import Network.HTTP.Simple
@@ -87,17 +88,17 @@ main = do
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = getMessage loggerHandle,
-            Bot.makeUpdateReq = makeUpdateReq info,
+          { Bot.getMessage = getMessage loggerHandle info,
+            Bot.makeUpdateReq = makeUpdateReqFromMessage info,
             Bot.makeHelpReq = makeHelpReq token helpText,
             Bot.makeRepeatReq = makeRepeatReq token,
             Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
             Bot.getText = MessageText . fromMaybe "" . text,
             Bot.getUserID = UserID . peerID,
             Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = markAsReadMes loggerHandle token
+            Bot.markAsReadMes = markAsReadMes loggerHandle info token
           }
-  _ <- runStateT (Bot.getUpdate botHandle Nothing) Bot.initialRepeatNumState
+  _ <- runStateT (Bot.getUpdates botHandle Nothing) Bot.initialRepeatNumState
   return ()
 
 versionAPI :: Double
@@ -128,13 +129,23 @@ makeConnectionInfoReq (Token token) (GroupID groupID) = do
         ]
   makeRequest path host param
 
-getMessage :: Logger.Handle IO -> Request -> BotState (Maybe Message)
-getMessage logger req = do
+getMessage :: Logger.Handle IO -> ConnectionInfo -> Request -> BotState (Maybe Message)
+getMessage logger info req = do
   response <- tryGetResponseBotState logger req
   liftIO $ Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
-  liftIO $ Logger.info logger ("Parsed response and got message:\n" ++ show mes)
-  return mes
+  if isNothing mes
+    then do
+      let upd = parseMaybe parseJSON $ getResponseBody response :: Maybe UpdateID
+      liftIO $ Logger.info logger ("Parsed response and got update id:\n" ++ show upd)
+      case upd of
+        Just x -> do
+          newReq <- makeUpdateReq info x
+          getMessage logger info newReq
+        Nothing -> return Nothing
+    else do
+      liftIO $ Logger.info logger ("Parsed response and got message:\n" ++ show mes)
+      return mes
 
 makeRequest :: Path -> Host -> Query -> Request
 makeRequest (Path path) (Host host) param =
@@ -144,17 +155,21 @@ makeRequest (Path path) (Host host) param =
         setRequestPort 443 $
           setRequestSecure True defaultRequest
 
-makeUpdateReq :: ConnectionInfo -> Maybe Message -> BotState Request
-makeUpdateReq info mes = do
+makeUpdateReqFromMessage :: ConnectionInfo -> Maybe Message -> BotState Request
+makeUpdateReqFromMessage info mes = do
   let ts' = case mes of
         Just m -> tsMes m
         Nothing -> ts info
-      path = Path $ Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
-      host = Host "lp.vk.com"
-      param =
+  makeUpdateReq info (UpdateID ts')
+
+makeUpdateReq :: ConnectionInfo -> UpdateID -> BotState Request
+makeUpdateReq info (UpdateID updID) = do
+  let path = Path $ Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
+  let host = Host "lp.vk.com"
+  let param =
         [ ("act", Just "a_check"),
           ("key", Just . Char8.pack $ key info),
-          ("ts", Just $ Char8.pack ts'),
+          ("ts", Just $ Char8.pack updID),
           ("wait", Just "25")
         ]
   return $ makeRequest path host param
@@ -291,8 +306,8 @@ makeRepeatQuestionReq (Token token) (RepeatText repeatText) mes (RepeatNum repea
       host = Host "api.vk.com"
   return $ makeRequest path host param
 
-markAsReadMes :: Logger.Handle IO -> Token -> Message -> BotState ()
-markAsReadMes logger (Token token) mes = do
+markAsReadMes :: Logger.Handle IO -> ConnectionInfo -> Token -> Message -> BotState ()
+markAsReadMes logger info (Token token) mes = do
   let param =
         [ ("message_ids", Just $ toByteString [tsMes mes]),
           ("peer_id", Just $ toByteString $ peerID mes),
@@ -303,7 +318,7 @@ markAsReadMes logger (Token token) mes = do
       path = Path "/method/messages.markAsRead"
       host = Host "api.vk.com"
   let req = makeRequest path host param
-  _ <- getMessage logger req
+  _ <- getMessage logger info req
   let _ = Logger.info logger ("Marked as read message #" ++ tsMes mes)
   return ()
 

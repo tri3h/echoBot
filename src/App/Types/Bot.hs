@@ -22,8 +22,10 @@ newtype HelpText = HelpText BS.ByteString
 newtype RepeatText = RepeatText BS.ByteString
 
 newtype RepeatNumState = RepeatNumState
-  { repeatNums :: Map UserID RepeatNum
+  { repeatNums :: Map UserID (RepeatNum, WaitingNewNum)
   }
+
+type WaitingNewNum = Bool
 
 type BotState = StateT RepeatNumState IO
 
