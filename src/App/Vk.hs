@@ -4,14 +4,30 @@ module App.Vk where
 
 import qualified App.Handlers.Bot as Bot
 import qualified App.Handlers.Logger as Logger
-import App.Types.Bot (BotState)
+import App.Types.Bot
+  ( BotState,
+    HelpText (..),
+    MessageText (MessageText),
+    Path (..),
+    RepeatNum (..),
+    RepeatText (..),
+    Token (..),
+    UserID (UserID),
+    defaultHelpText,
+    defaultLogVerbosity,
+    defaultRepeatNum,
+    defaultRepeatText,
+  )
 import App.Types.Vk
   ( Attachment (Media, Sticker, accessKey, mediaID, name, ownerID),
     ConnectionInfo (key, server, ts),
     ForwardID (forwardID),
     GeoInfo (lat, long),
+    GroupID (GroupID),
+    Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
   )
+import App.Utility (toByteString, tryGetResponse, tryGetResponseBotState)
 import Control.Monad.State (MonadIO (liftIO), StateT (runStateT))
 import Data.Aeson (encode)
 import Data.Aeson.Types
@@ -32,7 +48,6 @@ import Network.HTTP.Simple
     Request,
     defaultRequest,
     getResponseBody,
-    httpJSON,
     setRequestHost,
     setRequestPath,
     setRequestPort,
@@ -45,18 +60,30 @@ import System.Random (Random (randomRIO))
 main :: IO ()
 main = do
   config <- Config.load [Config.Required "Configs/VK.config"]
-  token <- Config.require config "token"
-  groupID <- Config.require config "group_id"
-  helpText <- Config.require config "help_text"
-  repeatText <- Config.require config "repeat_text"
-  defaultNum <- Config.require config "repeat_times.default"
-  maybeLogVerbosity <- Config.require config "log_verbosity"
-  logVerbosity <- maybe exitFailure return (Logger.fromString maybeLogVerbosity)
+  maybeLogVerbosity <- Config.lookup config "log_verbosity"
+  let logVerbosity = case maybeLogVerbosity of
+        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
+        Nothing -> defaultLogVerbosity
   let loggerHandle =
         Logger.Handle
           { Logger.verbosity = logVerbosity,
             Logger.writeLog = putStrLn
           }
+  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
+  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
+  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
+  maybeGroupID <- Config.lookup config "group_id"
+  groupID <- case maybeGroupID of
+    Just x -> return $ GroupID x
+    Nothing -> do
+      Logger.error loggerHandle "Group id has invalid format"
+      exitFailure
+  maybeToken <- Config.lookup config "token"
+  token <- case maybeToken of
+    Just x -> return $ Token x
+    Nothing -> do
+      Logger.error loggerHandle "Token has invalid format"
+      exitFailure
   info <- getConnectionInfo loggerHandle token groupID
   let botHandle =
         Bot.Handle
@@ -65,8 +92,8 @@ main = do
             Bot.makeHelpReq = makeHelpReq token helpText,
             Bot.makeRepeatReq = makeRepeatReq token,
             Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
-            Bot.getText = fromMaybe "" . text,
-            Bot.getUserID = peerID,
+            Bot.getText = MessageText . fromMaybe "" . text,
+            Bot.getUserID = UserID . peerID,
             Bot.defaultRepeatNum = defaultNum,
             Bot.markAsReadMes = markAsReadMes loggerHandle token
           }
@@ -76,10 +103,10 @@ main = do
 versionAPI :: Double
 versionAPI = 5.131
 
-getConnectionInfo :: Logger.Handle IO -> BS.ByteString -> BS.ByteString -> IO ConnectionInfo
+getConnectionInfo :: Logger.Handle IO -> Token -> GroupID -> IO ConnectionInfo
 getConnectionInfo logger token groupID = do
   let req = makeConnectionInfoReq token groupID
-  resp <- httpJSON req
+  resp <- tryGetResponse logger req
   Logger.debug logger ("Made request for connection info and got response:\n" ++ show resp)
   let info = parseMaybe parseJSON $ getResponseBody resp :: Maybe ConnectionInfo
   case info of
@@ -90,10 +117,10 @@ getConnectionInfo logger token groupID = do
       Logger.error logger "Connection information is not found"
       exitFailure
 
-makeConnectionInfoReq :: BS.ByteString -> BS.ByteString -> Request
-makeConnectionInfoReq token groupID = do
-  let path = "/method/groups.getLongPollServer"
-      host = "api.vk.com"
+makeConnectionInfoReq :: Token -> GroupID -> Request
+makeConnectionInfoReq (Token token) (GroupID groupID) = do
+  let path = Path "/method/groups.getLongPollServer"
+      host = Host "api.vk.com"
       param =
         [ ("group_id", Just groupID),
           ("access_token", Just token),
@@ -103,14 +130,14 @@ makeConnectionInfoReq token groupID = do
 
 getMessage :: Logger.Handle IO -> Request -> BotState (Maybe Message)
 getMessage logger req = do
-  response <- httpJSON req
+  response <- tryGetResponseBotState logger req
   liftIO $ Logger.debug logger ("Got response:\n" ++ show response)
   let mes = parseMaybe parseJSON $ getResponseBody response :: Maybe Message
   liftIO $ Logger.info logger ("Parsed response and got message:\n" ++ show mes)
   return mes
 
-makeRequest :: BS.ByteString -> BS.ByteString -> Query -> Request
-makeRequest path host param =
+makeRequest :: Path -> Host -> Query -> Request
+makeRequest (Path path) (Host host) param =
   setRequestQueryString param $
     setRequestPath path $
       setRequestHost host $
@@ -122,8 +149,8 @@ makeUpdateReq info mes = do
   let ts' = case mes of
         Just m -> tsMes m
         Nothing -> ts info
-      path = Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
-      host = "lp.vk.com"
+      path = Path $ Char8.pack (drop (length ("https://lp.vk.com" :: String)) (server info))
+      host = Host "lp.vk.com"
       param =
         [ ("act", Just "a_check"),
           ("key", Just . Char8.pack $ key info),
@@ -132,8 +159,8 @@ makeUpdateReq info mes = do
         ]
   return $ makeRequest path host param
 
-makeHelpReq :: BS.ByteString -> BS.ByteString -> Message -> BotState Request
-makeHelpReq token helpText mes = do
+makeHelpReq :: Token -> HelpText -> Message -> BotState Request
+makeHelpReq (Token token) (HelpText helpText) mes = do
   random <- getRandomNum
   let param =
         [ ("message", Just helpText),
@@ -142,12 +169,12 @@ makeHelpReq token helpText mes = do
           ("access_token", Just token),
           ("v", Just $ toByteString versionAPI)
         ]
-      path = "/method/messages.send"
-      host = "api.vk.com"
+      path = Path "/method/messages.send"
+      host = Host "api.vk.com"
   return $ makeRequest path host param
 
-makeRepeatReq :: BS.ByteString -> Message -> BotState Request
-makeRepeatReq token mes = do
+makeRepeatReq :: Token -> Message -> BotState Request
+makeRepeatReq (Token token) mes = do
   random <- getRandomNum
   let botMessage = case text mes of
         Just x -> Just $ Encoding.encodeUtf8 $ Text.pack x
@@ -173,8 +200,8 @@ makeRepeatReq token mes = do
           ("long", longitude),
           ("v", Just $ toByteString versionAPI)
         ]
-      path = "/method/messages.send"
-      host = "api.vk.com"
+      path = Path "/method/messages.send"
+      host = Host "api.vk.com"
   return $ makeRequest path host param
 
 mediaToBS :: Message -> Maybe BS.ByteString
@@ -207,8 +234,8 @@ stickerToBS mes = case attachments mes of
     getSticker (Sticker s : _) = toByteString s
     getSticker (_ : xs) = getSticker xs
 
-makeRepeatQuestionReq :: BS.ByteString -> BS.ByteString -> Message -> Integer -> BotState Request
-makeRepeatQuestionReq token repeatText mes repeatNum = do
+makeRepeatQuestionReq :: Token -> RepeatText -> Message -> RepeatNum -> BotState Request
+makeRepeatQuestionReq (Token token) (RepeatText repeatText) mes (RepeatNum repeatNum) = do
   random <- getRandomNum
   let param =
         [ ("keyboard", Just $ BSL.toStrict $ encode buttons),
@@ -260,12 +287,12 @@ makeRepeatQuestionReq token repeatText mes repeatNum = do
                    ]
                  ]
           ]
-      path = "/method/messages.send"
-      host = "api.vk.com"
+      path = Path "/method/messages.send"
+      host = Host "api.vk.com"
   return $ makeRequest path host param
 
-markAsReadMes :: Logger.Handle IO -> BS.ByteString -> Message -> BotState ()
-markAsReadMes logger token mes = do
+markAsReadMes :: Logger.Handle IO -> Token -> Message -> BotState ()
+markAsReadMes logger (Token token) mes = do
   let param =
         [ ("message_ids", Just $ toByteString [tsMes mes]),
           ("peer_id", Just $ toByteString $ peerID mes),
@@ -273,8 +300,8 @@ markAsReadMes logger token mes = do
           ("mark_conversation_as_read", Just "1"),
           ("v", Just $ toByteString versionAPI)
         ]
-      path = "/method/messages.markAsRead"
-      host = "api.vk.com"
+      path = Path "/method/messages.markAsRead"
+      host = Host "api.vk.com"
   let req = makeRequest path host param
   _ <- getMessage logger req
   let _ = Logger.info logger ("Marked as read message #" ++ tsMes mes)
@@ -282,6 +309,3 @@ markAsReadMes logger token mes = do
 
 getRandomNum :: BotState Integer
 getRandomNum = liftIO $ randomRIO (0, 100000000)
-
-toByteString :: Show a => a -> BS.ByteString
-toByteString x = Char8.pack $ show x

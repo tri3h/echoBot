@@ -6,6 +6,7 @@ cabal-version: 1.12
 --
 -- hash: 1336fcd4c04c21e0f97e9f11a77f7c368928516ef6b0bc2a9e9335cc0eb0c70c
 
+
 name:           bot
 version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/bot#readme>
@@ -33,6 +34,7 @@ library
       App.Types.Bot
       App.Types.Tg
       App.Types.Vk
+      App.Utility
       App.Vk
   other-modules:
       Paths_bot

@@ -1,7 +1,13 @@
 {-# LANGUAGE LambdaCase #-}
 
-import App.Handlers.Bot (RepeatNumState (RepeatNumState), initialRepeatNumState)
+import App.Handlers.Bot (initialRepeatNumState)
 import qualified App.Handlers.Bot as H
+import App.Types.Bot
+  ( MessageText (MessageText),
+    RepeatNum (..),
+    RepeatNumState (RepeatNumState),
+    UserID (UserID),
+  )
 import Control.Monad.State (StateT, evalStateT)
 import Data.Functor.Identity (Identity)
 import Test.Hspec (describe, hspec, it, shouldBe)
@@ -15,10 +21,10 @@ handle =
         Nothing -> return "",
       H.makeHelpReq = return,
       H.makeRepeatReq = return,
-      H.makeRepeatQuestionReq = \mes n -> return (mes ++ show n),
-      H.getText = id,
-      H.getUserID = const 0,
-      H.defaultRepeatNum = 1,
+      H.makeRepeatQuestionReq = \mes (RepeatNum n) -> return (mes ++ show n),
+      H.getText = MessageText,
+      H.getUserID = UserID . const 0,
+      H.defaultRepeatNum = RepeatNum 1,
       H.markAsReadMes = \_ -> return ()
     }
 
@@ -54,11 +60,11 @@ main = hspec $ do
       result `shouldBe` return (Just "This is help text for message")
   describe "Testing change repeat number" $ do
     it "Should get default repeat number" $ do
-      let result = makeResult $ H.getRepeatNum handle 2
-      result `shouldBe` 1
+      let result = makeResult $ H.getRepeatNum handle (UserID 2)
+      result `shouldBe` return (RepeatNum 1)
     it "Should set repeat number for the user" $ do
-      let result = makeResult $ H.setRepeatNum 1 5 >> H.getRepeatNum handle 1
-      result `shouldBe` 5
+      let result = makeResult $ H.setRepeatNum (UserID 1) (RepeatNum 5) >> H.getRepeatNum handle (UserID 1)
+      result `shouldBe` return (RepeatNum 5)
   describe "Testing repeat message" $
     it "Should send same message" $ do
       let result = makeResult $ H.repeatMessage handle "This is message"
