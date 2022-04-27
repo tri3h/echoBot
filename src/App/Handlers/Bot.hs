@@ -4,7 +4,7 @@
 module App.Handlers.Bot where
 
 import App.Types.Bot (MessageText (..), RepeatNum (..), RepeatNumState (..), UserID, WaitingNewNum)
-import Control.Monad.State (MonadState, forM_, get, put, when)
+import Control.Monad.State (MonadState, forM_, get, modify, when)
 import Data.Map (empty, insert, lookup)
 import Data.Maybe (isNothing)
 import Text.Read (readMaybe)
@@ -77,9 +77,8 @@ sendRepeatQuestion handle mes = do
 
 changeWaitingNewNum :: MonadState RepeatNumState m => Handle m req mes -> UserID -> WaitingNewNum -> m ()
 changeWaitingNewNum handle userID bool = do
-  state <- get
   num <- getRepeatNum handle userID
-  put $ state {repeatNums = insert userID (num, bool) $ repeatNums state}
+  modify $ \s -> s {repeatNums = insert userID (num, bool) $ repeatNums s}
 
 isWaitingNewNum :: MonadState RepeatNumState m => UserID -> m WaitingNewNum
 isWaitingNewNum userID = do
@@ -107,9 +106,8 @@ repeatMessage handle mes = do
       getMessage handle req
 
 setRepeatNum :: MonadState RepeatNumState m => UserID -> RepeatNum -> m ()
-setRepeatNum userId num = do
-  state <- get
-  put $ state {repeatNums = insert userId (num, False) $ repeatNums state}
+setRepeatNum userId num =
+  modify $ \s -> s {repeatNums = insert userId (num, False) $ repeatNums s}
 
 getRepeatNum :: MonadState RepeatNumState m => Handle m req mes -> UserID -> m RepeatNum
 getRepeatNum handle userId = do
