@@ -8,9 +8,8 @@ import Data.Aeson.Types (FromJSON (parseJSON), Parser)
 import qualified Data.ByteString as BS
 import qualified Data.Text as Text
 
-newtype GroupID = GroupID BS.ByteString
-
 newtype Host = Host BS.ByteString
+
 newtype UpdateID = UpdateID String deriving (Show)
 
 data Message = Message

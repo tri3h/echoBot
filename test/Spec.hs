@@ -28,6 +28,7 @@ handle =
       H.markAsReadMes = \_ -> return ()
     }
 
+makeResult :: Monad m => StateT RepeatNumState m a -> m a
 makeResult state = evalStateT state initialRepeatNumState
 
 main :: IO ()
@@ -60,10 +61,10 @@ main = hspec $ do
       result `shouldBe` return (Just "This is help text for message")
   describe "Testing change repeat number" $ do
     it "Should get default repeat number" $ do
-      let result = makeResult $ H.getRepeatNum handle (UserID 2)
+      let result = makeResult $ H.getRepeatNumber handle (UserID 2)
       result `shouldBe` return (RepeatNum 1)
     it "Should set repeat number for the user" $ do
-      let result = makeResult $ H.setRepeatNum (UserID 1) (RepeatNum 5) >> H.getRepeatNum handle (UserID 1)
+      let result = makeResult $ H.setRepeatNum (UserID 1) (RepeatNum 5) >> H.getRepeatNumber handle (UserID 1)
       result `shouldBe` return (RepeatNum 5)
   describe "Testing repeat message" $
     it "Should send same message" $ do

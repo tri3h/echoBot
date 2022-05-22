@@ -2,28 +2,23 @@
 
 module App.Vk where
 
+import App.Config (load)
 import qualified App.Handlers.Bot as Bot
 import qualified App.Handlers.Logger as Logger
+import App.Logger (make)
 import App.Types.Bot
   ( BotState,
-    HelpText (..),
     MessageText (MessageText),
     Path (..),
     RepeatNum (..),
-    RepeatText (..),
-    Token (..),
     UserID (UserID),
-    defaultHelpText,
-    defaultLogVerbosity,
-    defaultRepeatNum,
-    defaultRepeatText,
   )
+import App.Types.Config (Config (..), GroupID (GroupID), HelpText (HelpText), RepeatText (RepeatText), Token (Token))
 import App.Types.Vk
   ( Attachment (Media, Sticker, accessKey, mediaID, name, ownerID),
     ConnectionInfo (key, server, ts),
     ForwardID (forwardID),
     GeoInfo (lat, long),
-    GroupID (GroupID),
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
     UpdateID (UpdateID),
@@ -40,7 +35,6 @@ import Data.Aeson.Types
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.Configurator as Config
 import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Encoding
@@ -60,43 +54,21 @@ import System.Random (Random (randomRIO))
 
 main :: IO ()
 main = do
-  config <- Config.load [Config.Required "Configs/VK.config"]
-  maybeLogVerbosity <- Config.lookup config "log_verbosity"
-  let logVerbosity = case maybeLogVerbosity of
-        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
-        Nothing -> defaultLogVerbosity
-  let loggerHandle =
-        Logger.Handle
-          { Logger.verbosity = logVerbosity,
-            Logger.writeLog = putStrLn
-          }
-  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
-  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
-  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
-  maybeGroupID <- Config.lookup config "group_id"
-  groupID <- case maybeGroupID of
-    Just x -> return $ GroupID x
-    Nothing -> do
-      Logger.error loggerHandle "Group id has invalid format"
-      exitFailure
-  maybeToken <- Config.lookup config "token"
-  token <- case maybeToken of
-    Just x -> return $ Token x
-    Nothing -> do
-      Logger.error loggerHandle "Token has invalid format"
-      exitFailure
-  info <- getConnectionInfo loggerHandle token groupID
+  logger <- make
+  config <- load logger
+  let t = tokenVK config
+  info <- getConnectionInfo logger t $ groupVK config
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = getMessage loggerHandle info,
+          { Bot.getMessage = getMessage logger info,
             Bot.makeUpdateReq = makeUpdateReqFromMessage info,
-            Bot.makeHelpReq = makeHelpReq token helpText,
-            Bot.makeRepeatReq = makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
+            Bot.makeHelpReq = makeHelpReq t $ helpText config,
+            Bot.makeRepeatReq = makeRepeatReq t,
+            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq t $ repeatText config,
             Bot.getText = MessageText . fromMaybe "" . text,
             Bot.getUserID = UserID . peerID,
-            Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = markAsReadMes loggerHandle info token
+            Bot.defaultRepeatNum = repeatNum config,
+            Bot.markAsReadMes = markAsReadMes logger info t
           }
   _ <- runStateT (Bot.getUpdates botHandle Nothing) Bot.initialRepeatNumState
   return ()
@@ -175,10 +147,10 @@ makeUpdateReq info (UpdateID updID) = do
   return $ makeRequest path host param
 
 makeHelpReq :: Token -> HelpText -> Message -> BotState Request
-makeHelpReq (Token token) (HelpText helpText) mes = do
+makeHelpReq (Token token) (HelpText help) mes = do
   random <- getRandomNum
   let param =
-        [ ("message", Just helpText),
+        [ ("message", Just help),
           ("peer_id", Just $ toByteString $ peerID mes),
           ("random_id", Just $ toByteString random),
           ("access_token", Just token),
@@ -250,11 +222,11 @@ stickerToBS mes = case attachments mes of
     getSticker (_ : xs) = getSticker xs
 
 makeRepeatQuestionReq :: Token -> RepeatText -> Message -> RepeatNum -> BotState Request
-makeRepeatQuestionReq (Token token) (RepeatText repeatText) mes (RepeatNum repeatNum) = do
+makeRepeatQuestionReq (Token token) (RepeatText repText) mes (RepeatNum num) = do
   random <- getRandomNum
   let param =
         [ ("keyboard", Just $ BSL.toStrict $ encode buttons),
-          ("message", Just $ repeatText `BS.append` toByteString repeatNum),
+          ("message", Just $ repText `BS.append` toByteString num),
           ("peer_id", Just $ toByteString $ peerID mes),
           ("random_id", Just $ toByteString random),
           ("access_token", Just token),
