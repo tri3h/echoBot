@@ -1,15 +1,16 @@
 module Main where
 
+import qualified App.Handlers.Logger as Logger
+import App.Logger (make)
 import qualified App.Tg as Tg
 import qualified App.Vk as Vk
+import System.Environment (getArgs)
 
 main :: IO ()
 main = do
-  print "Type a number to choose bot (1 - Telegram, 2 - Vkontakte)"
-  number <- getLine
-  case number of
-    "1" -> Tg.main
-    "2" -> Vk.main
-    _ -> do
-      print "Incorrect number"
-      main
+  args <- getArgs
+  logger <- make
+  case args of
+    "tg" : _ -> Tg.main logger
+    "vk" : _ -> Vk.main logger
+    _ -> Logger.error logger "No bot selected"
