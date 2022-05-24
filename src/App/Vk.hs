@@ -5,7 +5,6 @@ module App.Vk where
 import App.Config (load)
 import qualified App.Handlers.Bot as Bot
 import qualified App.Handlers.Logger as Logger
-import App.Logger (make)
 import App.Types.Bot
   ( BotState,
     MessageText (MessageText),
@@ -52,9 +51,8 @@ import Network.HTTP.Simple
 import System.Exit (exitFailure)
 import System.Random (Random (randomRIO))
 
-main :: IO ()
-main = do
-  logger <- make
+main :: Logger.Handle IO -> IO ()
+main logger = do
   config <- load logger
   let t = tokenVK config
   info <- getConnectionInfo logger t $ groupVK config
