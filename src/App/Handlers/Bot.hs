@@ -70,14 +70,14 @@ sendHelp handle mes = do
 sendRepeatQuestion :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 sendRepeatQuestion handle mes = do
   let userID = getUserID handle mes
-  num <- getRepeatNum handle userID
+  num <- getRepeatNumber handle userID
   req <- makeRepeatQuestionReq handle mes num
   changeWaitingNewNum handle userID True
   getMessage handle req
 
 changeWaitingNewNum :: MonadState RepeatNumState m => Handle m req mes -> UserID -> WaitingNewNum -> m ()
 changeWaitingNewNum handle userID bool = do
-  num <- getRepeatNum handle userID
+  num <- getRepeatNumber handle userID
   modify $ \s -> s {repeatNums = insert userID (num, bool) $ repeatNums s}
 
 isWaitingNewNum :: MonadState RepeatNumState m => UserID -> m WaitingNewNum
@@ -94,7 +94,7 @@ textToNum (MessageText text) = RepeatNum <$> (readMaybe text :: Maybe Integer)
 repeatMessage :: MonadState RepeatNumState m => Handle m req mes -> mes -> m (Maybe mes)
 repeatMessage handle mes = do
   let userID = getUserID handle mes
-  (RepeatNum num) <- getRepeatNum handle userID
+  (RepeatNum num) <- getRepeatNumber handle userID
   repeat num
   where
     repeat 1 = send
@@ -109,8 +109,8 @@ setRepeatNum :: MonadState RepeatNumState m => UserID -> RepeatNum -> m ()
 setRepeatNum userId num =
   modify $ \s -> s {repeatNums = insert userId (num, False) $ repeatNums s}
 
-getRepeatNum :: MonadState RepeatNumState m => Handle m req mes -> UserID -> m RepeatNum
-getRepeatNum handle userId = do
+getRepeatNumber :: MonadState RepeatNumState m => Handle m req mes -> UserID -> m RepeatNum
+getRepeatNumber handle userId = do
   state <- get
   let maybeNum = lookup userId $ repeatNums state
   case maybeNum of

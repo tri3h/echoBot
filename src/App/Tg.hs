@@ -2,21 +2,24 @@
 
 module App.Tg where
 
+import App.Config (load)
 import qualified App.Handlers.Bot as Bot
 import qualified App.Handlers.Logger as Logger
 import App.Types.Bot
   ( BotState,
-    HelpText (..),
     MessageText (MessageText),
     Path (..),
     RepeatNum (..),
-    RepeatText (..),
-    Token (..),
     UserID (UserID),
-    defaultHelpText,
-    defaultLogVerbosity,
-    defaultRepeatNum,
-    defaultRepeatText,
+  )
+import App.Types.Config
+  ( Config (tokenTG),
+    HelpText (HelpText),
+    RepeatText (RepeatText),
+    Token (Token),
+    helpText,
+    repeatNum,
+    repeatText,
   )
 import App.Types.Tg
   ( Message (chatID, fromChatID, messageID, text, updateID),
@@ -31,7 +34,6 @@ import Data.Aeson.Types
     parseMaybe,
   )
 import qualified Data.ByteString as BS
-import qualified Data.Configurator as Config
 import Data.Maybe (fromMaybe)
 import Network.HTTP.Simple
   ( Query,
@@ -48,38 +50,21 @@ import Network.HTTP.Simple
   )
 import System.Exit (exitFailure)
 
-main :: IO ()
-main = do
-  config <- Config.load [Config.Required "Configs/TG.config"]
-  maybeLogVerbosity <- Config.lookup config "log_verbosity"
-  let logVerbosity = case maybeLogVerbosity of
-        Just x -> fromMaybe defaultLogVerbosity $ Logger.fromString x
-        Nothing -> defaultLogVerbosity
-  let loggerHandle =
-        Logger.Handle
-          { Logger.verbosity = logVerbosity,
-            Logger.writeLog = putStrLn
-          }
-  helpText <- HelpText <$> Config.lookupDefault defaultHelpText config "help_text"
-  repeatText <- RepeatText <$> Config.lookupDefault defaultRepeatText config "repeat_text"
-  defaultNum <- RepeatNum <$> Config.lookupDefault defaultRepeatNum config "repeat_times.default"
-  maybeToken <- Config.lookup config "token"
-  token <- case maybeToken of
-    Just x -> return $ Token x
-    Nothing -> do
-      Logger.error loggerHandle "Token has invalid format"
-      exitFailure
+main :: Logger.Handle IO -> IO ()
+main logger = do
+  config <- load logger
+  let t = tokenTG config
   let botHandle =
         Bot.Handle
-          { Bot.getMessage = getMessage loggerHandle,
-            Bot.makeUpdateReq = makeUpdateReq token,
-            Bot.makeHelpReq = makeHelpReq token helpText,
-            Bot.makeRepeatReq = makeRepeatReq token,
-            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq token repeatText,
+          { Bot.getMessage = getMessage logger,
+            Bot.makeUpdateReq = makeUpdateReq t,
+            Bot.makeHelpReq = makeHelpReq t $ helpText config,
+            Bot.makeRepeatReq = makeRepeatReq t,
+            Bot.makeRepeatQuestionReq = makeRepeatQuestionReq t $ repeatText config,
             Bot.getText = MessageText . fromMaybe "" . text,
             Bot.getUserID = UserID . chatID,
-            Bot.defaultRepeatNum = defaultNum,
-            Bot.markAsReadMes = markAsReadMes loggerHandle token
+            Bot.defaultRepeatNum = repeatNum config,
+            Bot.markAsReadMes = markAsReadMes logger t
           }
   _ <- runStateT (Bot.getUpdates botHandle Nothing) Bot.initialRepeatNumState
   return ()
@@ -122,10 +107,10 @@ makeUpdateReq (Token token) mes = do
     getOffset (Just m) = Just . toByteString $ updateID m + 1
 
 makeHelpReq :: Token -> HelpText -> Message -> BotState Request
-makeHelpReq (Token token) (HelpText helpText) mes = do
+makeHelpReq (Token token) (HelpText help) mes = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
-          ("text", Just helpText)
+          ("text", Just help)
         ]
       path = Path $ "/bot" `BS.append` token `BS.append` "/sendMessage"
   return $ makeRequest path params Null
@@ -142,10 +127,10 @@ makeRepeatReq (Token token) mes = do
   return $ makeRequest path params Null
 
 makeRepeatQuestionReq :: Token -> RepeatText -> Message -> RepeatNum -> BotState Request
-makeRepeatQuestionReq (Token token) (RepeatText repeatText) mes (RepeatNum num) = do
+makeRepeatQuestionReq (Token token) (RepeatText repText) mes (RepeatNum num) = do
   let params =
         [ ("chat_id", Just . toByteString $ chatID mes),
-          ("text", Just $ repeatText `BS.append` toByteString num)
+          ("text", Just $ repText `BS.append` toByteString num)
         ]
       buttons =
         object
