@@ -1,7 +1,7 @@
 # bot
 
 ## How to run
-Before the first run, a config file should be filled. This file is **Bot.config** which is in the folder **Configs**.
+Before the first run, a config file should be filled. This file is **Bot.config.template** which is in the folder **Configs**. Then this file should be renamed to **Bot.config**.
 Also it may be necessary to use a command *stack setup*.
 
 After that the project may be started from command line by typing either *stack run tg* to run Telegram bot or *stack run vk* to run Vkontakte bot while being in the project folder. 
