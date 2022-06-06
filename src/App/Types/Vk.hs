@@ -47,6 +47,11 @@ data GeoInfo = GeoInfo
 
 newtype ForwardID = ForwardID {forwardID :: Integer} deriving (Show)
 
+newtype SettingsSet = SettingsSet Integer deriving (Show)
+
+instance FromJSON SettingsSet where
+  parseJSON = withObject "Settings" $ \o -> SettingsSet <$> o .: "response"
+
 instance FromJSON Message where
   parseJSON = withObject "Message" $ \o -> do
     tsMes <- o .: "ts"

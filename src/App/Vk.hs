@@ -20,6 +20,7 @@ import App.Types.Vk
     GeoInfo (lat, long),
     Host (Host),
     Message (attachments, forward, geo, peerID, text, tsMes),
+    SettingsSet,
     UpdateID (UpdateID),
   )
 import App.Utility (toByteString, tryGetResponse, tryGetResponseBotState)
@@ -55,7 +56,9 @@ main :: Logger.Handle IO -> IO ()
 main logger = do
   config <- load logger
   let t = tokenVK config
-  info <- getConnectionInfo logger t $ groupVK config
+  let group = groupVK config
+  setSettings logger t group
+  info <- getConnectionInfo logger t group
   let botHandle =
         Bot.Handle
           { Bot.getMessage = getMessage logger info,
@@ -74,6 +77,30 @@ main logger = do
 versionAPI :: Double
 versionAPI = 5.131
 
+setSettings :: Logger.Handle IO -> Token -> GroupID -> IO ()
+setSettings logger token groupID = do
+  let req = makeSettingsReq token groupID
+  resp <- tryGetResponse logger req
+  let result = parseMaybe parseJSON $ getResponseBody resp :: Maybe SettingsSet
+  case result of
+    Just _ -> return ()
+    _ -> do
+      Logger.error logger "Could not set long poll settings"
+      exitFailure
+
+makeSettingsReq :: Token -> GroupID -> Request
+makeSettingsReq (Token token) (GroupID groupID) =
+  let path = Path "/method/groups.setLongPollSettings"
+      host = Host "api.vk.com"
+      param =
+        [ ("group_id", Just groupID),
+          ("access_token", Just token),
+          ("enabled", Just $ toByteString (1 :: Integer)),
+          ("message_new", Just $ toByteString (1 :: Integer)),
+          ("v", Just $ toByteString versionAPI)
+        ]
+   in makeRequest path host param
+
 getConnectionInfo :: Logger.Handle IO -> Token -> GroupID -> IO ConnectionInfo
 getConnectionInfo logger token groupID = do
   let req = makeConnectionInfoReq token groupID
@@ -89,7 +116,7 @@ getConnectionInfo logger token groupID = do
       exitFailure
 
 makeConnectionInfoReq :: Token -> GroupID -> Request
-makeConnectionInfoReq (Token token) (GroupID groupID) = do
+makeConnectionInfoReq (Token token) (GroupID groupID) =
   let path = Path "/method/groups.getLongPollServer"
       host = Host "api.vk.com"
       param =
@@ -97,7 +124,7 @@ makeConnectionInfoReq (Token token) (GroupID groupID) = do
           ("access_token", Just token),
           ("v", Just $ toByteString versionAPI)
         ]
-  makeRequest path host param
+   in makeRequest path host param
 
 getMessage :: Logger.Handle IO -> ConnectionInfo -> Request -> BotState (Maybe Message)
 getMessage logger info req = do
